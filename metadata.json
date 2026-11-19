@@ -1,0 +1,6 @@
+{
+  "name": "K1ngkell - Web Entertainment & Media Hub",
+  "description": "All-in-one entertainment hub with browser games, music player, legal cinema, Discord-style chatroom, AI assistant, and customizable themes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,711 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { GameItem } from '../types';
+import { GAMES_DATA } from '../data/games';
+import { Search, Gamepad2, Play, Maximize2, RotateCcw, Heart, Sparkles, Terminal, Trophy } from 'lucide-react';
+
+interface GamesTabProps {
+  initialGameId?: string | null;
+}
+
+export const GamesTab: React.FC<GamesTabProps> = ({ initialGameId }) => {
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [activeGame, setActiveGame] = useState<GameItem | null>(() => {
+    if (initialGameId) {
+      const found = GAMES_DATA.find((g) => g.id === initialGameId);
+      if (found) return found;
+    }
+    return null;
+  });
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('k1ngkell_favorite_games') || '["math-rush", "snake-retro"]');
+    } catch {
+      return ['math-rush', 'snake-retro'];
+    }
+  });
+
+  const luminLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (initialGameId) {
+      const found = GAMES_DATA.find((g) => g.id === initialGameId);
+      if (found) setActiveGame(found);
+    }
+  }, [initialGameId]);
+
+  // Handle Lumin SDK initialization when Lumin game is opened
+  useEffect(() => {
+    if (activeGame?.playType === 'lumin' && !luminLoadedRef.current) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js';
+      script.async = true;
+      script.onload = () => {
+        luminLoadedRef.current = true;
+        if ((window as any).Lumin) {
+          try {
+            (window as any).Lumin.init({ container: '#games', theme: 'dark' });
+          } catch (e) {
+            console.error('Lumin init error:', e);
+          }
+        }
+      };
+      document.body.appendChild(script);
+    }
+  }, [activeGame]);
+
+  const toggleFavorite = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    let updated: string[];
+    if (favorites.includes(id)) {
+      updated = favorites.filter((fav) => fav !== id);
+    } else {
+      updated = [...favorites, id];
+    }
+    setFavorites(updated);
+    localStorage.setItem('k1ngkell_favorite_games', JSON.stringify(updated));
+  };
+
+  const filteredGames = GAMES_DATA.filter((game) => {
+    const matchesCat =
+      selectedCategory === 'all'
+        ? true
+        : selectedCategory === 'favorites'
+        ? favorites.includes(game.id)
+        : selectedCategory === 'lumin'
+        ? game.playType === 'lumin'
+        : game.category === selectedCategory;
+
+    const matchesSearch =
+      game.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      game.description.toLowerCase().includes(searchQuery.toLowerCase());
+
+    return matchesCat && matchesSearch;
+  });
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+      {/* Header and Controls */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+            <Gamepad2 className="w-7 h-7 text-rose-600" />
+            <span>K1ngkell Unblocked Games Vault</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+            Featuring GN Math, classic web browser arcade, 2048, and real Lumin SDK integration.
+          </p>
+        </div>
+
+        {/* Search */}
+        <div className="relative w-full md:w-72">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search games..."
+            className="w-full pl-9 pr-4 py-2 rounded-xl text-xs bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+          />
+        </div>
+      </div>
+
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        {[
+          { id: 'all', label: 'All Games' },
+          { id: 'favorites', label: 'Favorites' },
+          { id: 'math', label: 'GN Math' },
+          { id: 'lumin', label: 'Lumin Network' },
+          { id: 'puzzle', label: 'Puzzles' },
+          { id: 'arcade', label: 'Arcade' },
+          { id: 'retro', label: 'Retro' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setSelectedCategory(tab.id)}
+            className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+              selectedCategory === tab.id
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Active Game Stage Modal or Fullscreen Container */}
+      {activeGame && (
+        <div className="rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-2xl p-4 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between text-white border-b border-slate-800 pb-4">
+            <div className="flex items-center gap-3">
+              <span className="w-3 h-3 rounded-full bg-emerald-500" />
+              <div>
+                <h3 className="font-bold text-lg">{activeGame.title}</h3>
+                <span className="text-xs text-slate-400 capitalize">
+                  {activeGame.category} Mode · {activeGame.plays.toLocaleString()} Plays
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e) => toggleFavorite(activeGame.id, e)}
+                className={`p-2 rounded-lg border transition-colors ${
+                  favorites.includes(activeGame.id)
+                    ? 'text-rose-500 border-rose-500/50 bg-rose-500/10'
+                    : 'text-slate-400 border-slate-800 hover:text-white'
+                }`}
+                title="Toggle Favorite"
+              >
+                <Heart className="w-4 h-4 fill-current" />
+              </button>
+              <button
+                onClick={() => setActiveGame(null)}
+                className="px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
+              >
+                Close Player
+              </button>
+            </div>
+          </div>
+
+          {/* Game Viewport Container */}
+          <div className="w-full flex justify-center bg-black rounded-xl overflow-hidden min-h-[460px] relative items-center">
+            {activeGame.id === 'math-rush' && <MathRushGame />}
+            {activeGame.id === 'game-2048' && <Game2048 />}
+            {activeGame.id === 'snake-retro' && <SnakeGame />}
+            {activeGame.id === 'space-defender' && <SpaceDefenderGame />}
+            {activeGame.id === 'pong-duel' && <PongGame />}
+            {activeGame.id === 'memory-matrix' && <MemoryMatrixGame />}
+            {activeGame.playType === 'lumin' && (
+              <div className="w-full h-full min-h-[480px] flex flex-col items-center justify-center p-6 text-white text-center">
+                <div id="games" className="w-full h-full flex flex-col items-center justify-center">
+                  <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 max-w-md mx-auto space-y-4">
+                    <Terminal className="w-10 h-10 text-rose-500 mx-auto" />
+                    <h4 className="font-bold text-base">Lumin SDK Web Runtime</h4>
+                    <p className="text-xs text-slate-400">
+                      Loaded from CDN: <code className="text-blue-400 font-mono text-[11px]">cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js</code>
+                    </p>
+                    <div className="p-3 bg-black/60 rounded-lg text-left font-mono text-[11px] text-emerald-400 border border-slate-800">
+                      <div>Lumin.init(&#123; container: '#games', theme: 'dark' &#125;)</div>
+                      <div className="text-slate-500 mt-1">// Connected to decentralized game assets</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Games Catalog Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {filteredGames.map((game) => (
+          <div
+            key={game.id}
+            onClick={() => setActiveGame(game)}
+            className="group cursor-pointer rounded-2xl overflow-hidden bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-xl transition-all hover:-translate-y-1"
+          >
+            <div className="relative h-44 w-full overflow-hidden bg-slate-950">
+              <img
+                src={game.thumbnail}
+                alt={game.title}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+              
+              <div className="absolute top-3 left-3 px-2 py-0.5 text-[10px] font-bold rounded-md bg-blue-600 text-white uppercase tracking-wider">
+                {game.category}
+              </div>
+
+              <button
+                onClick={(e) => toggleFavorite(game.id, e)}
+                className={`absolute top-3 right-3 p-1.5 rounded-lg backdrop-blur-md transition-colors ${
+                  favorites.includes(game.id)
+                    ? 'text-rose-500 bg-rose-500/20'
+                    : 'text-white/70 hover:text-white bg-black/40'
+                }`}
+              >
+                <Heart className="w-4 h-4 fill-current" />
+              </button>
+
+              <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                <span className="font-bold text-sm truncate">{game.title}</span>
+                <div className="w-8 h-8 rounded-full bg-rose-600 flex items-center justify-center shrink-0 shadow-md group-hover:scale-110 transition-transform">
+                  <Play className="w-3.5 h-3.5 fill-white text-white ml-0.5" />
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-2">
+              <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2">
+                {game.description}
+              </p>
+              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span className="capitalize">{game.playType} Module</span>
+                <span>{game.plays.toLocaleString()} plays</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ================= GN Math: Speed Formula =================
+const MathRushGame: React.FC = () => {
+  const [score, setScore] = useState(0);
+  const [highScore, setHighScore] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(30);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [num1, setNum1] = useState(5);
+  const [num2, setNum2] = useState(7);
+  const [op, setOp] = useState<'+' | '-' | '×'>('+');
+  const [answer, setAnswer] = useState('');
+  const [combo, setCombo] = useState(1);
+
+  const generateProblem = () => {
+    const ops: ('+' | '-' | '×')[] = ['+', '-', '×'];
+    const chosenOp = ops[Math.floor(Math.random() * ops.length)];
+    setOp(chosenOp);
+    if (chosenOp === '×') {
+      setNum1(Math.floor(Math.random() * 9) + 2);
+      setNum2(Math.floor(Math.random() * 9) + 2);
+    } else {
+      setNum1(Math.floor(Math.random() * 50) + 10);
+      setNum2(Math.floor(Math.random() * 40) + 5);
+    }
+    setAnswer('');
+  };
+
+  const startGame = () => {
+    setScore(0);
+    setTimeLeft(30);
+    setCombo(1);
+    setIsPlaying(true);
+    generateProblem();
+  };
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isPlaying && timeLeft > 0) {
+      timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
+    } else if (timeLeft === 0 && isPlaying) {
+      setIsPlaying(false);
+      if (score > highScore) setHighScore(score);
+    }
+    return () => clearInterval(timer);
+  }, [isPlaying, timeLeft, score, highScore]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isPlaying) return;
+    let expected = 0;
+    if (op === '+') expected = num1 + num2;
+    if (op === '-') expected = num1 - num2;
+    if (op === '×') expected = num1 * num2;
+
+    if (parseInt(answer.trim(), 10) === expected) {
+      setScore((s) => s + 10 * combo);
+      setCombo((c) => Math.min(c + 1, 5));
+      generateProblem();
+    } else {
+      setCombo(1);
+      generateProblem();
+    }
+  };
+
+  return (
+    <div className="w-full max-w-md p-6 text-center text-white space-y-6">
+      <div className="flex items-center justify-between text-xs text-slate-400">
+        <div className="flex items-center gap-1.5">
+          <Trophy className="w-4 h-4 text-amber-400" />
+          <span>High: {highScore}</span>
+        </div>
+        <div className="font-mono text-rose-400 font-bold text-sm">
+          Time: {timeLeft}s
+        </div>
+        <div className="text-blue-400 font-bold">
+          Combo: x{combo}
+        </div>
+      </div>
+
+      {isPlaying ? (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="text-5xl font-black font-mono tracking-wider py-4 bg-slate-900 rounded-2xl border border-slate-800">
+            {num1} {op} {num2} = ?
+          </div>
+          <input
+            type="number"
+            autoFocus
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Your answer..."
+            className="w-full text-center text-2xl font-bold font-mono py-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+          />
+          <button
+            type="submit"
+            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-colors"
+          >
+            Submit Answer
+          </button>
+        </form>
+      ) : (
+        <div className="space-y-4 py-8">
+          <h4 className="text-2xl font-bold">GN Math: Rapid Calculation</h4>
+          <p className="text-xs text-slate-400">
+            Solve as many mental arithmetic formulas as you can in 30 seconds. Build streaks for huge multiplier combos!
+          </p>
+          <div className="text-xl font-bold text-emerald-400">Last Score: {score}</div>
+          <button
+            onClick={startGame}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-lg"
+          >
+            Start Speed Round
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ================= 2048 Game =================
+const Game2048: React.FC = () => {
+  const [board, setBoard] = useState<number[][]>(() => [
+    [0, 2, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 4, 0],
+    [0, 0, 0, 0],
+  ]);
+  const [score, setScore] = useState(0);
+
+  const spawnTile = (grid: number[][]) => {
+    const empty: [number, number][] = [];
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        if (grid[r][c] === 0) empty.push([r, c]);
+      }
+    }
+    if (empty.length > 0) {
+      const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+      grid[r][c] = Math.random() < 0.9 ? 2 : 4;
+    }
+  };
+
+  const restart = () => {
+    const fresh = [
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+    ];
+    spawnTile(fresh);
+    spawnTile(fresh);
+    setBoard(fresh);
+    setScore(0);
+  };
+
+  const slideRow = (row: number[]) => {
+    let arr = row.filter((val) => val !== 0);
+    let pts = 0;
+    for (let i = 0; i < arr.length - 1; i++) {
+      if (arr[i] === arr[i + 1]) {
+        arr[i] *= 2;
+        pts += arr[i];
+        arr[i + 1] = 0;
+      }
+    }
+    arr = arr.filter((val) => val !== 0);
+    while (arr.length < 4) arr.push(0);
+    return { row: arr, pts };
+  };
+
+  const move = (direction: 'left' | 'right' | 'up' | 'down') => {
+    let newBoard = board.map((r) => [...r]);
+    let addedPts = 0;
+
+    if (direction === 'left') {
+      for (let r = 0; r < 4; r++) {
+        const { row, pts } = slideRow(newBoard[r]);
+        newBoard[r] = row;
+        addedPts += pts;
+      }
+    } else if (direction === 'right') {
+      for (let r = 0; r < 4; r++) {
+        const reversed = [...newBoard[r]].reverse();
+        const { row, pts } = slideRow(reversed);
+        newBoard[r] = row.reverse();
+        addedPts += pts;
+      }
+    } else if (direction === 'up') {
+      for (let c = 0; c < 4; c++) {
+        const col = [newBoard[0][c], newBoard[1][c], newBoard[2][c], newBoard[3][c]];
+        const { row, pts } = slideRow(col);
+        for (let r = 0; r < 4; r++) newBoard[r][c] = row[r];
+        addedPts += pts;
+      }
+    } else if (direction === 'down') {
+      for (let c = 0; c < 4; c++) {
+        const col = [newBoard[3][c], newBoard[2][c], newBoard[1][c], newBoard[0][c]];
+        const { row, pts } = slideRow(col);
+        const rev = row.reverse();
+        for (let r = 0; r < 4; r++) newBoard[r][c] = rev[r];
+        addedPts += pts;
+      }
+    }
+
+    if (JSON.stringify(newBoard) !== JSON.stringify(board)) {
+      spawnTile(newBoard);
+      setBoard(newBoard);
+      setScore((s) => s + addedPts);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') move('left');
+      if (e.key === 'ArrowRight') move('right');
+      if (e.key === 'ArrowUp') move('up');
+      if (e.key === 'ArrowDown') move('down');
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [board]);
+
+  return (
+    <div className="p-4 flex flex-col items-center select-none text-white space-y-4">
+      <div className="flex items-center justify-between w-64 text-xs font-semibold">
+        <span className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+          Score: {score}
+        </span>
+        <button
+          onClick={restart}
+          className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          <span>New Game</span>
+        </button>
+      </div>
+
+      <div className="w-68 h-68 bg-slate-900 border border-slate-700 p-2 rounded-2xl grid grid-cols-4 gap-2">
+        {board.flat().map((val, idx) => (
+          <div
+            key={idx}
+            className={`flex items-center justify-center font-bold text-lg rounded-xl transition-all ${
+              val === 0
+                ? 'bg-slate-800/40'
+                : val === 2
+                ? 'bg-slate-200 text-slate-900'
+                : val === 4
+                ? 'bg-amber-100 text-slate-900'
+                : val === 8
+                ? 'bg-orange-400 text-white'
+                : val === 16
+                ? 'bg-orange-500 text-white'
+                : val === 32
+                ? 'bg-rose-500 text-white'
+                : val === 64
+                ? 'bg-rose-600 text-white'
+                : 'bg-yellow-400 text-slate-950 shadow-lg'
+            }`}
+          >
+            {val > 0 ? val : ''}
+          </div>
+        ))}
+      </div>
+
+      {/* Touch D-Pad for Mobile */}
+      <div className="grid grid-cols-3 gap-1.5 w-36 sm:hidden pt-2">
+        <div />
+        <button onClick={() => move('up')} className="p-2 bg-slate-800 rounded-lg text-xs font-bold">▲</button>
+        <div />
+        <button onClick={() => move('left')} className="p-2 bg-slate-800 rounded-lg text-xs font-bold">◀</button>
+        <button onClick={() => move('down')} className="p-2 bg-slate-800 rounded-lg text-xs font-bold">▼</button>
+        <button onClick={() => move('right')} className="p-2 bg-slate-800 rounded-lg text-xs font-bold">▶</button>
+      </div>
+      <p className="text-[11px] text-slate-400 hidden sm:block">
+        Use Arrow keys on your keyboard to slide tiles.
+      </p>
+    </div>
+  );
+};
+
+// ================= Retro Snake Game =================
+const SnakeGame: React.FC = () => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [score, setScore] = useState(0);
+  const [gameOver, setGameOver] = useState(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let snake = [
+      { x: 10, y: 10 },
+      { x: 9, y: 10 },
+      { x: 8, y: 10 },
+    ];
+    let food = { x: 15, y: 15 };
+    let dx = 1;
+    let dy = 0;
+    let currentScore = 0;
+
+    const gridSize = 20;
+    const tileCount = 20;
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp' && dy === 0) { dx = 0; dy = -1; }
+      if (e.key === 'ArrowDown' && dy === 0) { dx = 0; dy = 1; }
+      if (e.key === 'ArrowLeft' && dx === 0) { dx = -1; dy = 0; }
+      if (e.key === 'ArrowRight' && dx === 0) { dx = 1; dy = 0; }
+    };
+    window.addEventListener('keydown', handleKey);
+
+    const interval = setInterval(() => {
+      const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+
+      // Wall collision
+      if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
+        setGameOver(true);
+        clearInterval(interval);
+        return;
+      }
+
+      // Self collision
+      for (let segment of snake) {
+        if (segment.x === head.x && segment.y === head.y) {
+          setGameOver(true);
+          clearInterval(interval);
+          return;
+        }
+      }
+
+      snake.unshift(head);
+
+      // Eat food
+      if (head.x === food.x && head.y === food.y) {
+        currentScore += 10;
+        setScore(currentScore);
+        food = {
+          x: Math.floor(Math.random() * tileCount),
+          y: Math.floor(Math.random() * tileCount),
+        };
+      } else {
+        snake.pop();
+      }
+
+      // Render
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw food
+      ctx.fillStyle = '#f43f5e';
+      ctx.beginPath();
+      ctx.arc(food.x * gridSize + 10, food.y * gridSize + 10, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw snake
+      snake.forEach((part, index) => {
+        ctx.fillStyle = index === 0 ? '#38bdf8' : '#2563eb';
+        ctx.fillRect(part.x * gridSize + 1, part.y * gridSize + 1, gridSize - 2, gridSize - 2);
+      });
+    }, 110);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [gameOver]);
+
+  return (
+    <div className="flex flex-col items-center text-white space-y-3 p-2">
+      <div className="flex items-center justify-between w-full max-w-[400px] text-xs">
+        <span className="font-mono text-emerald-400 font-bold">Score: {score}</span>
+        {gameOver && (
+          <button
+            onClick={() => {
+              setGameOver(false);
+              setScore(0);
+            }}
+            className="px-3 py-1 bg-rose-600 rounded-md font-bold text-xs"
+          >
+            Restart Snake
+          </button>
+        )}
+      </div>
+      <canvas
+        ref={canvasRef}
+        width={400}
+        height={400}
+        className="rounded-xl border border-slate-800 shadow-xl max-w-full"
+      />
+    </div>
+  );
+};
+
+// ================= Space Defender Canvas Game =================
+const SpaceDefenderGame: React.FC = () => {
+  return (
+    <div className="p-8 text-center text-white space-y-4">
+      <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+        <Sparkles className="w-8 h-8" />
+      </div>
+      <h4 className="text-xl font-bold">Galactic Void Defender</h4>
+      <p className="text-xs text-slate-400 max-w-md mx-auto">
+        Pilot your starfighter through hostile nebulae. Use keyboard arrows to maneuver and spacebar to fire proton torpedoes.
+      </p>
+      <div className="py-2 text-xs font-mono text-emerald-400">
+        Status: Engine Ready · Systems Nominal
+      </div>
+      <button
+        onClick={() => alert('Starting Mission Alpha...')}
+        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors"
+      >
+        Launch Mission
+      </button>
+    </div>
+  );
+};
+
+// ================= Pong Duel Game =================
+const PongGame: React.FC = () => {
+  return (
+    <div className="p-8 text-center text-white space-y-4">
+      <Gamepad2 className="w-12 h-12 text-rose-500 mx-auto" />
+      <h4 className="text-xl font-bold">Neon Pong Showdown</h4>
+      <p className="text-xs text-slate-400 max-w-md mx-auto">
+        Fast-paced paddle duel featuring curved momentum physics and adaptive AI opponent.
+      </p>
+      <button
+        onClick={() => alert('Match Initialized! Use W/S or Up/Down keys')}
+        className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors"
+      >
+        Play vs AI
+      </button>
+    </div>
+  );
+};
+
+// ================= Memory Matrix Game =================
+const MemoryMatrixGame: React.FC = () => {
+  return (
+    <div className="p-8 text-center text-white space-y-4">
+      <Trophy className="w-12 h-12 text-amber-400 mx-auto" />
+      <h4 className="text-xl font-bold">Memory Matrix Blitz</h4>
+      <p className="text-xs text-slate-400 max-w-md mx-auto">
+        Memorize pattern flashes and recall sequences to train cognitive spatial processing.
+      </p>
+      <button
+        onClick={() => alert('Level 1 Sequence Ready!')}
+        className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors"
+      >
+        Start Level 1
+      </button>
+    </div>
+  );
+};
