@@ -394,7 +394,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         </div>
 
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          The user requested signature logo is a bottle of a packet that says K1ngkell. You can also pick alternative badges.
+          Signature packet-bottle emblem for K1ngkell, or switch between alternative badge styles.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { TrackItem } from '../types';
 import { MUSIC_CATALOG } from '../data/music';
-import { Music2, Search, Heart, Play, Plus, ExternalLink, Radio, Disc3, ListMusic, Sliders } from 'lucide-react';
+import { Music2, Search, Heart, Play, Plus } from 'lucide-react';
 import { AmbientSoundMixer } from './AmbientSoundMixer';
+import { SafeImage } from './SafeImage';
 
 export const MusicTab: React.FC = () => {
   const [tracks, setTracks] = useState<TrackItem[]>(() => {
@@ -108,10 +109,10 @@ export const MusicTab: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-950 shrink-0 border border-slate-200 dark:border-slate-700">
-              <img
-                src={activeTrack.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=60'}
+              <SafeImage
+                src={activeTrack.artwork}
                 alt={activeTrack.title}
-                referrerPolicy="no-referrer"
+                fallbackIcon={<Music2 className="w-5 h-5 text-blue-400" />}
                 className="w-full h-full object-cover"
               />
             </div>
@@ -228,10 +229,10 @@ export const MusicTab: React.FC = () => {
             >
               <div className="flex items-center gap-3.5 min-w-0">
                 <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-950 shrink-0 relative flex items-center justify-center">
-                  <img
-                    src={track.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=60'}
+                  <SafeImage
+                    src={track.artwork}
                     alt={track.title}
-                    referrerPolicy="no-referrer"
+                    fallbackIcon={<Music2 className="w-4 h-4 text-blue-400" />}
                     className="w-full h-full object-cover"
                   />
                   {isCurrent && (

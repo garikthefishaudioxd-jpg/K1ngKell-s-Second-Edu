@@ -20,11 +20,23 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({
   const sessionToken = 'k1ngkell-sec-7f9e3a8d1c2b54';
 
   const handleExportData = () => {
+    const settingsSnapshot: Record<string, string | null> = {
+      k1ngkell_theme: localStorage.getItem('k1ngkell_theme'),
+      k1ngkell_dark_mode: localStorage.getItem('k1ngkell_dark_mode'),
+      k1ngkell_primary_color: localStorage.getItem('k1ngkell_primary_color'),
+      k1ngkell_custom_color: localStorage.getItem('k1ngkell_custom_color'),
+      k1ngkell_search_engine: localStorage.getItem('k1ngkell_search_engine'),
+      k1ngkell_timezone: localStorage.getItem('k1ngkell_timezone'),
+      k1ngkell_logo_style: localStorage.getItem('k1ngkell_logo_style'),
+      k1ngkell_offline_mode: localStorage.getItem('k1ngkell_offline_mode'),
+      k1ngkell_ambient_settings: localStorage.getItem('k1ngkell_ambient_settings'),
+    };
+
     const dataToExport = {
       timestamp: new Date().toISOString(),
       vaultVersion: '3.0.1',
       sessionToken,
-      userSettings: localStorage.getItem('k1ngkell_settings'),
+      userSettings: settingsSnapshot,
       favoriteGames: localStorage.getItem('k1ngkell_favorite_games'),
       musicLibrary: localStorage.getItem('k1ngkell_music_library'),
       checksum: 'sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
@@ -51,6 +63,13 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
+        if (parsed.userSettings && typeof parsed.userSettings === 'object') {
+          Object.entries(parsed.userSettings).forEach(([key, val]) => {
+            if (key.startsWith('k1ngkell_') && typeof val === 'string') {
+              localStorage.setItem(key, val);
+            }
+          });
+        }
         if (parsed.favoriteGames) localStorage.setItem('k1ngkell_favorite_games', parsed.favoriteGames);
         if (parsed.musicLibrary) localStorage.setItem('k1ngkell_music_library', parsed.musicLibrary);
         setExportMessage('Encrypted vault restored! Reloading state...');

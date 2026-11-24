@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from '../types';
-import { Hash, Send, Smile, Users, Crown, Bot, Sparkles, Pin, Search } from 'lucide-react';
+import { Hash, Send, Users, Crown, Bot } from 'lucide-react';
+import { SafeImage } from './SafeImage';
 
 interface Channel {
   id: string;
@@ -202,7 +203,7 @@ export const ChatTab: React.FC = () => {
           <div className="p-3 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="relative">
-                <img
+                <SafeImage
                   src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100"
                   alt="You"
                   className="w-8 h-8 rounded-full object-cover"
@@ -248,7 +249,7 @@ export const ChatTab: React.FC = () => {
 
             {channelMessages.map((msg) => (
               <div key={msg.id} className="flex items-start gap-3 group">
-                <img
+                <SafeImage
                   src={msg.avatar}
                   alt={msg.author}
                   className="w-9 h-9 rounded-full object-cover shrink-0 mt-0.5"
@@ -259,12 +260,12 @@ export const ChatTab: React.FC = () => {
                       {msg.author}
                     </span>
                     {msg.role === 'admin' && (
-                      <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400 flex items-center gap-0.5">
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400 flex items-center gap-0.5">
                         <Crown className="w-3 h-3" /> ADMIN
                       </span>
                     )}
                     {msg.role === 'bot' && (
-                      <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-blue-500/20 text-blue-400 flex items-center gap-0.5">
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-blue-500/20 text-blue-400 flex items-center gap-0.5">
                         <Bot className="w-3 h-3" /> BOT
                       </span>
                     )}
@@ -349,7 +350,7 @@ export const ChatTab: React.FC = () => {
               {ONLINE_MEMBERS.map((m) => (
                 <div key={m.name} className="flex items-center gap-2 py-1 px-1.5 rounded-lg hover:bg-slate-900">
                   <div className="relative">
-                    <img src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full object-cover" />
+                    <SafeImage src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full object-cover" />
                     <span
                       className={`absolute bottom-0 right-0 w-2 h-2 rounded-full ring-2 ring-slate-950 ${
                         m.status === 'online'

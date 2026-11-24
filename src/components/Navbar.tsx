@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActiveTab, LogoStyle } from '../types';
 import { Logo } from './Logo';
-import { Moon, Sun, Lock } from 'lucide-react';
+import { Moon, Sun, Lock, Globe } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: ActiveTab;
@@ -10,6 +10,8 @@ interface NavbarProps {
   setDarkMode: (val: boolean) => void;
   logoStyle: LogoStyle;
   onLockGate: () => void;
+  embedTabsCount?: number;
+  onResumeEmbed?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -19,6 +21,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   setDarkMode,
   logoStyle,
   onLockGate,
+  embedTabsCount = 0,
+  onResumeEmbed,
 }) => {
   const navTabs: { id: ActiveTab; label: string }[] = [
     { id: 'home', label: 'Home' },
@@ -42,7 +46,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <Logo style={logoStyle} className="w-8 h-8 group-hover:scale-105 transition-transform" />
         </button>
 
-        {/* Zone 2: Navigation Links (Single-Line, Responsive Scrollable on Mobile) */}
+        {/* Zone 2: Navigation Links */}
         <nav className="flex items-center gap-1 sm:gap-2 overflow-x-auto py-1 scrollbar-none">
           {navTabs.map((tab) => {
             const isActive = activeTab === tab.id;
@@ -62,8 +66,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           })}
         </nav>
 
-        {/* Zone 3: 1 Primary Action Group */}
+        {/* Zone 3: Primary Action Group */}
         <div className="flex items-center gap-2 shrink-0">
+          {embedTabsCount > 0 && onResumeEmbed && (
+            <button
+              onClick={onResumeEmbed}
+              title="Return to Open Embed Tabs"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Tabs ({embedTabsCount})</span>
+            </button>
+          )}
           <button
             onClick={() => setDarkMode(!darkMode)}
             title={darkMode ? 'Switch to Light Theme' : 'Switch to Dark Theme'}

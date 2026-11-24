@@ -189,7 +189,7 @@ export const AmbientSoundMixer: React.FC = () => {
     lfo.start();
 
     // Occasional gentle bird chirp
-    let chirpTimer: NodeJS.Timeout;
+    let chirpTimer: ReturnType<typeof setTimeout>;
     const triggerBird = () => {
       if (ctx.state === 'closed') return;
       const osc = ctx.createOscillator();
@@ -244,7 +244,7 @@ export const AmbientSoundMixer: React.FC = () => {
     chatter.start();
 
     // Subtle porcelain cup chime
-    let clinkTimer: NodeJS.Timeout;
+    let clinkTimer: ReturnType<typeof setTimeout>;
     const triggerClink = () => {
       if (ctx.state === 'closed') return;
       const osc = ctx.createOscillator();
@@ -295,7 +295,7 @@ export const AmbientSoundMixer: React.FC = () => {
     fire.start();
 
     // Random sharp crackle bursts
-    let popTimer: NodeJS.Timeout;
+    let popTimer: ReturnType<typeof setTimeout>;
     const triggerPop = () => {
       if (ctx.state === 'closed') return;
       const osc = ctx.createOscillator();
@@ -342,6 +342,7 @@ export const AmbientSoundMixer: React.FC = () => {
 
     // Modulation gain for swell & ebb
     const swellGain = ctx.createGain();
+    swellGain.gain.setValueAtTime(0.5, ctx.currentTime);
     const lfo = ctx.createOscillator();
     lfo.frequency.setValueAtTime(0.12, ctx.currentTime); // ~8 sec wave period
 
@@ -470,6 +471,11 @@ export const AmbientSoundMixer: React.FC = () => {
         soundNodesRef.current[id].stop();
       });
       soundNodesRef.current = {};
+      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+        audioCtxRef.current.close().catch(() => {});
+      }
+      audioCtxRef.current = null;
+      masterGainRef.current = null;
     };
   }, []);
 

@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { MovieItem } from '../types';
 import { MOVIES_DATA } from '../data/movies';
-import { Film, Play, Search, ShieldCheck, Sparkles, Plus, Maximize, Volume2, Info } from 'lucide-react';
+import { Film, Play, Search, ShieldCheck, Plus } from 'lucide-react';
+import { SafeImage } from './SafeImage';
 
 export const CinemaTab: React.FC = () => {
   const [movies, setMovies] = useState<MovieItem[]>(MOVIES_DATA);
@@ -140,10 +141,11 @@ export const CinemaTab: React.FC = () => {
                 }`}
               >
                 <div className="relative aspect-video w-full overflow-hidden bg-slate-950">
-                  <img
+                  <SafeImage
                     src={movie.poster}
                     alt={movie.title}
-                    referrerPolicy="no-referrer"
+                    fallbackText={movie.title}
+                    fallbackIcon={<Film className="w-8 h-8 text-amber-400" />}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />

@@ -82,3 +82,25 @@ export interface UserSettings {
   username: string;
   userAvatar: string;
 }
+
+export interface EmbedSearchResult {
+  title: string;
+  snippet: string;
+  url: string;
+  source: string;
+}
+
+export interface EmbedTabItem {
+  id: string;
+  title: string;
+  url: string;
+  query?: string;
+  isLoading?: boolean;
+  results?: EmbedSearchResult[];
+  summary?: string;
+  error?: string;
+  viewMode: 'embed' | 'results' | 'newtab';
+  history: string[];
+  historyIndex: number;
+}
+
