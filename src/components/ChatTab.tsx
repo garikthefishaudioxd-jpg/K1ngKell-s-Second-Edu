@@ -9,11 +9,13 @@ import {
 } from '../services/firebaseAccountService';
 import {
   deleteFirestoreMessage,
+  ensureAllChannelsExist,
   reactFirestoreMessage,
   sendFirestoreMessage,
   setFirestoreTypingStatus,
   subscribeChannelMessages,
   subscribeChannelTyping,
+  updateFirestoreMessage,
 } from '../services/firebaseChatService';
 
 interface Channel {
@@ -145,6 +147,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   const [typingUsersByChannel, setTypingUsersByChannel] = useState<
     Record<string, Record<string, { username: string; updatedAt: number }>>
   >({});
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editContentDraft, setEditContentDraft] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
@@ -189,6 +193,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   useEffect(() => {
     if (!isSignedIn || !firebaseUid) return;
     setChatError(null);
+
+    void ensureAllChannelsExist(firebaseUid).catch(() => {
+      // Ignore initial channel ensure errors if rules temporarily block
+    });
 
     const unsubProfiles = subscribePublicProfiles(
       (profiles) => {
@@ -740,6 +748,43 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     }
   };
 
+  const handleSaveEditMessage = async (msgId: string) => {
+    const currentChannel = selectedChannel;
+    const cleanContent = editContentDraft.trim();
+    if (!cleanContent) return;
+
+    if (firebaseUid) {
+      try {
+        await updateFirestoreMessage({
+          channelId: currentChannel,
+          messageId: msgId,
+          authorUid: firebaseUid,
+          avatar: userAvatar,
+          content: cleanContent,
+        });
+        setEditingMessageId(null);
+        setEditContentDraft('');
+        setChatError(null);
+      } catch (err) {
+        setChatError(extractErrorText(err, 'Failed to update message.'));
+      }
+      return;
+    }
+
+    setLocalMessages((prev) => {
+      const list = prev[currentChannel] || [];
+      const updated = list.map((m) =>
+        m.id === msgId ? { ...m, content: cleanContent } : m
+      );
+      const next = { ...prev, [currentChannel]: updated };
+      syncLocalBroadcast(next);
+      return next;
+    });
+
+    setEditingMessageId(null);
+    setEditContentDraft('');
+  };
+
   const displayMembers = useMemo(() => {
     const map = new Map<string, OnlineUser>();
     onlineUsers.forEach((u) => map.set(u.clientId, u));
@@ -1042,21 +1087,66 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                         <span className="text-[10px] text-slate-500">
                           {msg.timestamp}
                         </span>
-                        {isOwn && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteMessage(msg.id)}
-                            title="Delete message"
-                            className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-rose-400 transition-opacity ml-auto"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        {isOwn && editingMessageId !== msg.id && (
+                          <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMessageId(msg.id);
+                                setEditContentDraft(msg.content);
+                              }}
+                              title="Edit message"
+                              className="p-0.5 text-slate-400 hover:text-blue-400 transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMessage(msg.id)}
+                              title="Delete message"
+                              className="p-0.5 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         )}
                       </div>
 
-                      <p className="text-xs text-slate-200 mt-1 leading-relaxed break-words whitespace-pre-wrap">
-                        {msg.content}
-                      </p>
+                      {editingMessageId === msg.id ? (
+                        <div className="mt-2 space-y-2">
+                          <textarea
+                            value={editContentDraft}
+                            onChange={(e) => setEditContentDraft(e.target.value)}
+                            rows={2}
+                            maxLength={2000}
+                            autoFocus
+                            className="w-full p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white focus:outline-hidden focus:ring-1 focus:ring-rose-500 resize-none"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveEditMessage(msg.id)}
+                              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold transition-colors cursor-pointer"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMessageId(null);
+                                setEditContentDraft('');
+                              }}
+                              className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition-colors cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-200 mt-1 leading-relaxed break-words whitespace-pre-wrap">
+                          {msg.content}
+                        </p>
+                      )}
 
                       {/* Reaction chips */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-2">

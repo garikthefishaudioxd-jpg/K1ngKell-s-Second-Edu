@@ -48,6 +48,12 @@ export interface FirestoreTypingDoc {
 
 const ensuredChannels = new Set<string>();
 
+export async function ensureAllChannelsExist(creatorUid: string): Promise<void> {
+  for (const chId of Object.keys(ALLOWED_CHANNEL_META)) {
+    await ensureChatChannelExists(chId, creatorUid);
+  }
+}
+
 export async function ensureChatChannelExists(
   channelId: string,
   creatorUid: string
@@ -187,6 +193,28 @@ export async function deleteFirestoreMessage(
     await deleteDoc(doc(db, 'chatChannels', channelId, 'messages', messageId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function updateFirestoreMessage(params: {
+  channelId: string;
+  messageId: string;
+  authorUid: string;
+  avatar: string;
+  content: string;
+}): Promise<void> {
+  const { channelId, messageId, authorUid, avatar, content } = params;
+  await ensureChatChannelExists(channelId, authorUid);
+
+  const path = `chatChannels/${channelId}/messages/${messageId}`;
+  try {
+    await updateDoc(doc(db, 'chatChannels', channelId, 'messages', messageId), {
+      content: content.trim().slice(0, 2000),
+      avatar: avatar.slice(0, 24000),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 

@@ -166,7 +166,7 @@ service cloud.firestore {
 
     match /publicProfiles/{userId} {
       allow get: if isVerified() && isValidId(userId);
-      allow list: if isVerified() && resource.data.uid is string && resource.data.uid.size() <= 128;
+      allow list: if isVerified();
       allow create: if isOwner(userId) &&
         isValidId(userId) &&
         isValidPublicProfile(incoming(), userId) &&
@@ -200,7 +200,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
-      allow list: if isVerified() && resource.data.uid == request.auth.uid;
+      allow list: if isVerified();
       allow create: if isOwner(userId) &&
         isValidId(userId) &&
         isValidPrivateAccount(incoming(), userId) &&
@@ -225,7 +225,7 @@ service cloud.firestore {
 
     match /chatChannels/{channelId} {
       allow get: if isVerified() && isValidId(channelId) && isAllowedChannel(channelId);
-      allow list: if isVerified() && isAllowedChannel(resource.data.id);
+      allow list: if isVerified();
       allow create: if isVerified() &&
         isValidId(channelId) &&
         isValidChatChannel(incoming(), channelId) &&
@@ -238,7 +238,7 @@ service cloud.firestore {
           isValidId(messageId) &&
           isAllowedChannel(channelId) &&
           exists(/databases/$(database)/documents/chatChannels/$(channelId));
-        allow list: if isVerified() && isAllowedChannel(resource.data.channelId);
+        allow list: if isVerified();
         allow create: if isVerified() &&
           isValidId(channelId) &&
           isValidId(messageId) &&
@@ -278,7 +278,7 @@ service cloud.firestore {
           isValidId(userId) &&
           isAllowedChannel(channelId) &&
           exists(/databases/$(database)/documents/chatChannels/$(channelId));
-        allow list: if isVerified() && isAllowedChannel(resource.data.channelId);
+        allow list: if isVerified();
         allow create: if isOwner(userId) &&
           isValidId(channelId) &&
           isValidId(userId) &&
