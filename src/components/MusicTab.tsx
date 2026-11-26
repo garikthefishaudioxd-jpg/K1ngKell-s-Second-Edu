@@ -1,29 +1,66 @@
 import React, { useState, useEffect } from 'react';
 import { TrackItem } from '../types';
 import { MUSIC_CATALOG } from '../data/music';
-import { Music2, Search, Heart, Play, Plus } from 'lucide-react';
+import { Music2, Search, Heart, Play, Plus, Lock, LogIn } from 'lucide-react';
 import { AmbientSoundMixer } from './AmbientSoundMixer';
 import { SafeImage } from './SafeImage';
 
-export const MusicTab: React.FC = () => {
-  const [tracks, setTracks] = useState<TrackItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('k1ngkell_music_library');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return MUSIC_CATALOG;
-  });
+interface MusicTabProps {
+  isSignedIn: boolean;
+  onRequireSignIn: () => void;
+}
 
-  const [activeTrack, setActiveTrack] = useState<TrackItem>(MUSIC_CATALOG[0]);
+const STORAGE_KEY = 'k1ngkell_music_library';
+
+const loadSavedLibrary = (): TrackItem[] => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {
+    // ignore storage errors
+  }
+  return MUSIC_CATALOG;
+};
+
+export const MusicTab: React.FC<MusicTabProps> = ({ isSignedIn, onRequireSignIn }) => {
+  const [tracks, setTracks] = useState<TrackItem[]>(() =>
+    isSignedIn ? loadSavedLibrary() : MUSIC_CATALOG.map((t) => ({ ...t, isLiked: false }))
+  );
+
+  const [activeTrack, setActiveTrack] = useState<TrackItem>(tracks[0] || MUSIC_CATALOG[0]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState<string>('all');
   const [showOnlyLiked, setShowOnlyLiked] = useState<boolean>(false);
   const [customUrl, setCustomUrl] = useState('');
   const [customTitle, setCustomTitle] = useState('');
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
-  // Persist liked status & library
+  useEffect(() => {
+    if (isSignedIn) {
+      const saved = loadSavedLibrary();
+      setTracks(saved);
+      setActiveTrack((prev) => saved.find((t) => t.id === prev.id) || saved[0] || MUSIC_CATALOG[0]);
+      setAuthNotice(null);
+    } else {
+      const catalogOnly = MUSIC_CATALOG.map((t) => ({ ...t, isLiked: false }));
+      setTracks(catalogOnly);
+      setShowOnlyLiked(false);
+      setActiveTrack((prev) => catalogOnly.find((t) => t.id === prev.id) || catalogOnly[0]);
+    }
+  }, [isSignedIn]);
+
+  const requireAuth = (actionLabel: string) => {
+    setAuthNotice(`You are signed out. Sign in to ${actionLabel}.`);
+  };
+
+  // Persist liked status & library only when signed in
   const toggleLike = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!isSignedIn) {
+      requireAuth('save tracks or playlists');
+      return;
+    }
+
     const updated = tracks.map((t) =>
       t.id === id ? { ...t, isLiked: !t.isLiked } : t
     );
@@ -31,14 +68,29 @@ export const MusicTab: React.FC = () => {
     if (activeTrack.id === id) {
       setActiveTrack({ ...activeTrack, isLiked: !activeTrack.isLiked });
     }
-    localStorage.setItem('k1ngkell_music_library', JSON.stringify(updated));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const handleToggleSavedPlaylist = () => {
+    if (!isSignedIn) {
+      requireAuth('access saved playlists');
+      return;
+    }
+    setShowOnlyLiked((prev) => !prev);
   };
 
   const handleAddCustomTrack = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isSignedIn) {
+      requireAuth('save playlists or custom streams');
+      return;
+    }
     if (!customUrl.trim()) return;
 
-    // Build standard SoundCloud embed URL
     const encoded = encodeURIComponent(customUrl.trim());
     const embed = `https://w.soundcloud.com/player/?url=${encoded}&color=%23e11d48&auto_play=true&show_artwork=true`;
 
@@ -58,7 +110,11 @@ export const MusicTab: React.FC = () => {
     setActiveTrack(newTrack);
     setCustomUrl('');
     setCustomTitle('');
-    localStorage.setItem('k1ngkell_music_library', JSON.stringify(updated));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore storage errors
+    }
   };
 
   const genres = ['all', 'Lo-Fi Chill', 'Synthwave', 'EDM / Gaming', 'Chillhop', 'Dark Ambient'];
@@ -70,12 +126,12 @@ export const MusicTab: React.FC = () => {
       track.genre.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesGenre = selectedGenre === 'all' || track.genre === selectedGenre;
-    const matchesLiked = !showOnlyLiked || track.isLiked;
+    const matchesLiked = !showOnlyLiked || (isSignedIn && track.isLiked);
 
     return matchesSearch && matchesGenre && matchesLiked;
   });
 
-  const likedCount = tracks.filter((t) => t.isLiked).length;
+  const likedCount = isSignedIn ? tracks.filter((t) => t.isLiked).length : 0;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
@@ -87,7 +143,7 @@ export const MusicTab: React.FC = () => {
             <span>SoundCloud Music Lounge</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-            Stream SoundCloud mixes, curated study lo-fi, gaming beats, and add your favorite tracks.
+            Stream SoundCloud mixes, curated study lo-fi, gaming beats, and save playlists when signed in.
           </p>
         </div>
 
@@ -103,6 +159,33 @@ export const MusicTab: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Signed-Out Notice Banner */}
+      {!isSignedIn && authNotice && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-amber-900 dark:text-amber-200">
+          <div className="flex items-center gap-2.5 text-xs font-semibold">
+            <Lock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>{authNotice}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onRequireSignIn}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthNotice(null)}
+              className="px-2.5 py-1.5 rounded-xl text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Active Player Stage */}
       <div className="p-6 rounded-2xl bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
@@ -133,15 +216,23 @@ export const MusicTab: React.FC = () => {
 
           <div className="flex items-center gap-2 shrink-0">
             <button
+              type="button"
               onClick={(e) => toggleLike(activeTrack.id, e)}
-              className={`p-2.5 rounded-xl border transition-colors flex items-center gap-1.5 text-xs font-semibold ${
-                activeTrack.isLiked
+              title={!isSignedIn ? 'Sign in to save tracks' : activeTrack.isLiked ? 'Remove from saved' : 'Save to playlist'}
+              className={`p-2.5 rounded-xl border transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                !isSignedIn
+                  ? 'bg-slate-100 dark:bg-slate-800/70 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700'
+                  : activeTrack.isLiked
                   ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900'
                   : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:text-slate-900'
               }`}
             >
-              <Heart className={`w-4 h-4 ${activeTrack.isLiked ? 'fill-current' : ''}`} />
-              <span>{activeTrack.isLiked ? 'Liked' : 'Like'}</span>
+              {!isSignedIn ? (
+                <Lock className="w-3.5 h-3.5" />
+              ) : (
+                <Heart className={`w-4 h-4 ${activeTrack.isLiked ? 'fill-current' : ''}`} />
+              )}
+              <span>{!isSignedIn ? 'Sign In to Save' : activeTrack.isLiked ? 'Saved' : 'Save'}</span>
             </button>
           </div>
         </div>
@@ -165,15 +256,16 @@ export const MusicTab: React.FC = () => {
       {/* Layerable Ambient Sound Mixer */}
       <AmbientSoundMixer />
 
-      {/* Filter and Liked Songs Playlist Bar */}
+      {/* Filter and Saved Playlist Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
           <button
+            type="button"
             onClick={() => {
               setSelectedGenre('all');
               setShowOnlyLiked(false);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors cursor-pointer ${
               selectedGenre === 'all' && !showOnlyLiked
                 ? 'bg-rose-600 text-white'
                 : 'bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
@@ -183,25 +275,33 @@ export const MusicTab: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setShowOnlyLiked(!showOnlyLiked)}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-              showOnlyLiked
+            type="button"
+            onClick={handleToggleSavedPlaylist}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+              !isSignedIn
+                ? 'bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-800'
+                : showOnlyLiked
                 ? 'bg-rose-600 text-white'
                 : 'bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
             }`}
           >
-            <Heart className="w-3.5 h-3.5 fill-current" />
-            <span>Liked Songs ({likedCount})</span>
+            {!isSignedIn ? (
+              <Lock className="w-3.5 h-3.5" />
+            ) : (
+              <Heart className="w-3.5 h-3.5 fill-current" />
+            )}
+            <span>Saved Playlist{isSignedIn ? ` (${likedCount})` : ''}</span>
           </button>
 
           {genres.filter((g) => g !== 'all').map((genre) => (
             <button
+              type="button"
               key={genre}
               onClick={() => {
                 setSelectedGenre(genre);
                 setShowOnlyLiked(false);
               }}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors cursor-pointer ${
                 selectedGenre === genre && !showOnlyLiked
                   ? 'bg-blue-600 text-white'
                   : 'bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
@@ -259,15 +359,22 @@ export const MusicTab: React.FC = () => {
                   {track.duration}
                 </span>
                 <button
+                  type="button"
                   onClick={(e) => toggleLike(track.id, e)}
-                  className={`p-2 rounded-lg transition-colors ${
-                    track.isLiked
+                  className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                    !isSignedIn
+                      ? 'text-slate-400 hover:text-amber-500'
+                      : track.isLiked
                       ? 'text-rose-600 dark:text-rose-400'
                       : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
                   }`}
-                  title={track.isLiked ? 'Unlike' : 'Like'}
+                  title={!isSignedIn ? 'Sign in to save tracks' : track.isLiked ? 'Remove from saved' : 'Save to playlist'}
                 >
-                  <Heart className={`w-4 h-4 ${track.isLiked ? 'fill-current' : ''}`} />
+                  {!isSignedIn ? (
+                    <Lock className="w-4 h-4" />
+                  ) : (
+                    <Heart className={`w-4 h-4 ${track.isLiked ? 'fill-current' : ''}`} />
+                  )}
                 </button>
               </div>
             </div>
@@ -281,41 +388,71 @@ export const MusicTab: React.FC = () => {
         )}
       </div>
 
-      {/* Add Custom SoundCloud URL Section */}
+      {/* Add / Save Custom SoundCloud Track or Playlist Section */}
       <div className="p-6 rounded-2xl bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-        <div className="flex items-center gap-2">
-          <Plus className="w-5 h-5 text-rose-600" />
-          <h3 className="font-bold text-slate-900 dark:text-white text-base">
-            Embed Any SoundCloud Track or Playlist
-          </h3>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {isSignedIn ? (
+              <Plus className="w-5 h-5 text-rose-600" />
+            ) : (
+              <Lock className="w-5 h-5 text-amber-500" />
+            )}
+            <h3 className="font-bold text-slate-900 dark:text-white text-base">
+              Save SoundCloud Track or Playlist
+            </h3>
+          </div>
+          {!isSignedIn && (
+            <span className="px-2.5 py-0.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
+              Sign In Required
+            </span>
+          )}
         </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Paste any public SoundCloud song or album URL (e.g., https://soundcloud.com/artist/song-title) to immediately play and add it to your K1ngkell collection.
-        </p>
 
-        <form onSubmit={handleAddCustomTrack} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <input
-            type="text"
-            value={customTitle}
-            onChange={(e) => setCustomTitle(e.target.value)}
-            placeholder="Track Title (optional)"
-            className="px-3.5 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
-          />
-          <input
-            type="url"
-            required
-            value={customUrl}
-            onChange={(e) => setCustomUrl(e.target.value)}
-            placeholder="https://soundcloud.com/..."
-            className="px-3.5 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-xs"
-          >
-            Add & Play Stream
-          </button>
-        </form>
+        {isSignedIn ? (
+          <>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Paste any public SoundCloud song or playlist URL (e.g., https://soundcloud.com/artist/song-title) to play and save it to your K1ngkell playlist.
+            </p>
+
+            <form onSubmit={handleAddCustomTrack} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="text"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="Track or Playlist Title (optional)"
+                className="px-3.5 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+              />
+              <input
+                type="url"
+                required
+                value={customUrl}
+                onChange={(e) => setCustomUrl(e.target.value)}
+                placeholder="https://soundcloud.com/..."
+                className="px-3.5 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-xs cursor-pointer"
+              >
+                Save & Play Stream
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              You are currently signed out. Sign in to your K1ngkell account to save playlists, favorite tracks, or add custom SoundCloud streams.
+            </p>
+            <button
+              type="button"
+              onClick={onRequireSignIn}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 transition-colors cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Sign In to Save Playlists</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

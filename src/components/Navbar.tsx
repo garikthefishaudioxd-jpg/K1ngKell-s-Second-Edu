@@ -1,7 +1,8 @@
 import React from 'react';
 import { ActiveTab, LogoStyle } from '../types';
 import { Logo } from './Logo';
-import { Moon, Sun, Lock, Globe } from 'lucide-react';
+import { UserAvatar } from './UserAvatar';
+import { Moon, Sun, LogIn, LogOut, Globe } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: ActiveTab;
@@ -9,7 +10,10 @@ interface NavbarProps {
   darkMode: boolean;
   setDarkMode: (val: boolean) => void;
   logoStyle: LogoStyle;
-  onLockGate: () => void;
+  signedInUser: string | null;
+  userAvatar?: string;
+  onOpenSignIn: () => void;
+  onSignOut: () => void;
   embedTabsCount?: number;
   onResumeEmbed?: () => void;
 }
@@ -20,7 +24,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   darkMode,
   setDarkMode,
   logoStyle,
-  onLockGate,
+  signedInUser,
+  userAvatar,
+  onOpenSignIn,
+  onSignOut,
   embedTabsCount = 0,
   onResumeEmbed,
 }) => {
@@ -37,7 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         {/* Zone 1: Brand Wordmark */}
         <button
           onClick={() => setActiveTab('home')}
@@ -85,14 +92,37 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
-          <button
-            onClick={onLockGate}
-            title="Lock Portal Gate"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors"
-          >
-            <Lock className="w-3.5 h-3.5 text-rose-500" />
-            <span>Lock</span>
-          </button>
+
+          {signedInUser ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                title="Open Account Settings"
+                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+              >
+                <UserAvatar avatar={userAvatar} name={signedInUser} size="xs" />
+                <span className="max-w-[96px] truncate">{signedInUser}</span>
+              </button>
+              <button
+                onClick={onSignOut}
+                title="Sign Out"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-500" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onOpenSignIn}
+              title="Sign In to access Chat and save playlists"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-rose-600 to-blue-600 hover:from-rose-700 hover:to-blue-700 rounded-lg transition-colors whitespace-nowrap shadow-xs"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

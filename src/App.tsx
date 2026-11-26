@@ -25,6 +25,7 @@ import { AiAssistantTab } from './components/AiAssistantTab';
 import { SecurityTab } from './components/SecurityTab';
 import { SettingsTab } from './components/SettingsTab';
 import { EmbedWorkspace } from './components/EmbedWorkspace';
+import { getAccount, pickDistinctAvatarForAccount } from './utils/accountAuth';
 
 function isLikelyUrl(input: string): boolean {
   const trimmed = input.trim();
@@ -37,7 +38,7 @@ function normalizeEmbedUrl(raw: string): { url: string; title: string } {
   const withProto = /^https?:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`;
   try {
     const parsed = new URL(withProto);
-    // Convert standard YouTube links to embeddable player URLs
+    // Convert standard YouTube links to embeddable player URLs with JS API enabled
     if (
       (parsed.hostname.includes('youtube.com') && parsed.pathname === '/watch') ||
       parsed.hostname === 'youtu.be'
@@ -48,16 +49,25 @@ function normalizeEmbedUrl(raw: string): { url: string; title: string } {
           : parsed.searchParams.get('v');
       if (videoId) {
         return {
-          url: `https://www.youtube.com/embed/${videoId}`,
+          url: `https://www.youtube.com/embed/${videoId}?enablejsapi=1`,
           title: `YouTube (${videoId})`,
         };
       }
     }
-    // Convert standard Vimeo links to embeddable player URLs
+    if (parsed.hostname.includes('youtube.com') && parsed.pathname.startsWith('/embed/')) {
+      if (!parsed.searchParams.has('enablejsapi')) {
+        parsed.searchParams.set('enablejsapi', '1');
+      }
+      return {
+        url: parsed.toString(),
+        title: parsed.hostname.replace(/^www\./, ''),
+      };
+    }
+    // Convert standard Vimeo links to embeddable player URLs with player API enabled
     if (parsed.hostname === 'vimeo.com' && /^\/\d+/.test(parsed.pathname)) {
       const id = parsed.pathname.slice(1).split('/')[0];
       return {
-        url: `https://player.vimeo.com/video/${id}`,
+        url: `https://player.vimeo.com/video/${id}?api=1`,
         title: `Vimeo (${id})`,
       };
     }
@@ -70,20 +80,93 @@ function normalizeEmbedUrl(raw: string): { url: string; title: string } {
   }
 }
 
+const EMBED_TABS_STORAGE_KEY = 'k1ngkell_embed_tabs';
+const ACTIVE_EMBED_TAB_STORAGE_KEY = 'k1ngkell_active_embed_tab_id';
+const EMBED_OPEN_STORAGE_KEY = 'k1ngkell_is_embed_open';
+
+function loadSavedEmbedTabs(): EmbedTabItem[] {
+  try {
+    const raw = localStorage.getItem(EMBED_TABS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is EmbedTabItem =>
+          Boolean(item) &&
+          typeof item === 'object' &&
+          typeof item.id === 'string' &&
+          typeof item.title === 'string' &&
+          typeof item.url === 'string' &&
+          (item.viewMode === 'embed' ||
+            item.viewMode === 'results' ||
+            item.viewMode === 'newtab')
+      )
+      .map((tab) => ({
+        ...tab,
+        faviconUrl: typeof tab.faviconUrl === 'string' ? tab.faviconUrl : undefined,
+        isPlayingAudio: false,
+        isMuted: false,
+        isLoading: false,
+        history: Array.isArray(tab.history)
+          ? tab.history.filter((u): u is string => typeof u === 'string')
+          : tab.url
+          ? [tab.url]
+          : [],
+        historyIndex:
+          typeof tab.historyIndex === 'number'
+            ? tab.historyIndex
+            : tab.url
+            ? 0
+            : -1,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export default function App() {
-  // Gatekeeper state
-  const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
-    return localStorage.getItem('k1ngkell_gate_unlocked') === 'true';
+  // Signed-in session state (starts Signed Out unless user signs in)
+  const [signedInUser, setSignedInUser] = useState<string | null>(() => {
+    const saved = localStorage.getItem('k1ngkell_signed_in_user');
+    return saved && saved.trim() ? saved.trim() : null;
   });
+  const [userAvatar, setUserAvatar] = useState<string>(() => {
+    const savedUser = localStorage.getItem('k1ngkell_signed_in_user');
+    if (savedUser) {
+      const acct = getAccount(savedUser);
+      if (acct?.avatar) return acct.avatar;
+      const distinct = pickDistinctAvatarForAccount(savedUser);
+      return distinct;
+    }
+    return localStorage.getItem('k1ngkell_user_avatar') || 'initials';
+  });
+  const [showSignInModal, setShowSignInModal] = useState<boolean>(false);
 
   // Navigation tab
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
 
-  // Full-Screen Tabbed Embed Workspace State
-  const [embedTabs, setEmbedTabs] = useState<EmbedTabItem[]>([]);
-  const [activeEmbedTabId, setActiveEmbedTabId] = useState<string | null>(null);
-  const [isEmbedOpen, setIsEmbedOpen] = useState<boolean>(false);
+  // Full-Screen Tabbed Embed Workspace State (Restored from localStorage)
+  const [embedTabs, setEmbedTabs] = useState<EmbedTabItem[]>(() =>
+    loadSavedEmbedTabs()
+  );
+  const [activeEmbedTabId, setActiveEmbedTabId] = useState<string | null>(() => {
+    const savedTabs = loadSavedEmbedTabs();
+    if (savedTabs.length === 0) return null;
+    const savedActiveId = localStorage.getItem(ACTIVE_EMBED_TAB_STORAGE_KEY);
+    if (savedActiveId && savedTabs.some((t) => t.id === savedActiveId)) {
+      return savedActiveId;
+    }
+    return savedTabs[0].id;
+  });
+  const [isEmbedOpen, setIsEmbedOpen] = useState<boolean>(() => {
+    const savedTabs = loadSavedEmbedTabs();
+    return (
+      savedTabs.length > 0 &&
+      localStorage.getItem(EMBED_OPEN_STORAGE_KEY) === 'true'
+    );
+  });
 
   // Settings State with Persistence
   const [theme, setTheme] = useState<BackgroundTheme>(() => {
@@ -125,6 +208,37 @@ export default function App() {
   const [offlineMode, setOfflineMode] = useState<boolean>(() => {
     return localStorage.getItem('k1ngkell_offline_mode') === 'true';
   });
+
+  // Persist embed tabs, active tab selection, and open workspace state
+  useEffect(() => {
+    try {
+      const serializableTabs = embedTabs.map((tab) => ({
+        ...tab,
+        isLoading: false,
+      }));
+      localStorage.setItem(
+        EMBED_TABS_STORAGE_KEY,
+        JSON.stringify(serializableTabs)
+      );
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [embedTabs]);
+
+  useEffect(() => {
+    if (activeEmbedTabId) {
+      localStorage.setItem(ACTIVE_EMBED_TAB_STORAGE_KEY, activeEmbedTabId);
+    } else {
+      localStorage.removeItem(ACTIVE_EMBED_TAB_STORAGE_KEY);
+    }
+  }, [activeEmbedTabId]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      EMBED_OPEN_STORAGE_KEY,
+      (isEmbedOpen && embedTabs.length > 0).toString()
+    );
+  }, [isEmbedOpen, embedTabs.length]);
 
   // Keep dark class on html root element
   useEffect(() => {
@@ -168,10 +282,30 @@ export default function App() {
     localStorage.setItem('k1ngkell_offline_mode', offlineMode.toString());
   }, [offlineMode]);
 
-  const handleLockGate = () => {
+  useEffect(() => {
+    try {
+      localStorage.setItem('k1ngkell_user_avatar', userAvatar);
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [userAvatar]);
+
+  const handleSignOut = () => {
+    localStorage.removeItem('k1ngkell_signed_in_user');
     localStorage.removeItem('k1ngkell_gate_unlocked');
-    setIsUnlocked(false);
-    setIsEmbedOpen(false);
+    localStorage.removeItem('k1ngkell_captcha_verified');
+    localStorage.removeItem('k1ngkell_user_avatar');
+    setSignedInUser(null);
+    setUserAvatar('initials');
+  };
+
+  const handleSignInSuccess = (username: string, avatar?: string) => {
+    const acct = getAccount(username);
+    const resolvedAvatar =
+      avatar || acct?.avatar || pickDistinctAvatarForAccount(username);
+    setUserAvatar(resolvedAvatar);
+    setSignedInUser(username);
+    setShowSignInModal(false);
   };
 
   const handleLaunchGame = (gameId: string) => {
@@ -221,6 +355,9 @@ export default function App() {
               ...t,
               title,
               url,
+              faviconUrl: undefined,
+              isPlayingAudio: false,
+              isMuted: false,
               query: undefined,
               isLoading: false,
               error: undefined,
@@ -264,58 +401,68 @@ export default function App() {
         }
 
         if (!serverSearchSucceeded) {
-          const wikiRes = await fetch(
-            `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(
-              input
-            )}&limit=6&namespace=0&format=json&origin=*`
-          );
-          if (wikiRes.ok) {
-            const wikiData = await wikiRes.json();
-            if (Array.isArray(wikiData) && Array.isArray(wikiData[1])) {
-              const titles: string[] = wikiData[1];
-              const descriptions: string[] = wikiData[2] || [];
-              const urls: string[] = wikiData[3] || [];
-              results = titles
-                .map((title, i) => ({
-                  title,
-                  snippet: descriptions[i] || `Encyclopedia entry for ${title}.`,
-                  url: urls[i] || '',
-                  source: 'Wikipedia',
-                }))
-                .filter((r) => Boolean(r.url));
-            }
-          }
-          if (results[0]?.title) {
-            try {
-              const sumRes = await fetch(
-                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
-                  results[0].title
-                )}`
-              );
-              if (sumRes.ok) {
-                const sumData = await sumRes.json();
-                if (sumData.extract) summary = sumData.extract;
+          try {
+            const ddgRes = await fetch(
+              `https://api.duckduckgo.com/?q=${encodeURIComponent(
+                input
+              )}&format=json&no_html=1&skip_disambig=1`
+            );
+            if (ddgRes.ok) {
+              const ddgData = await ddgRes.json();
+              if (ddgData?.AbstractText) {
+                summary = ddgData.AbstractText;
               }
-            } catch {
-              // Summary is optional
+              if (ddgData?.AbstractURL && !/wikipedia\.org/i.test(ddgData.AbstractURL)) {
+                results.push({
+                  title: ddgData.Heading || input,
+                  snippet: ddgData.AbstractText || `Official result for ${input}.`,
+                  url: ddgData.AbstractURL,
+                  source: ddgData.AbstractSource || searchEngine,
+                });
+              }
+              if (Array.isArray(ddgData?.RelatedTopics)) {
+                for (const topic of ddgData.RelatedTopics.slice(0, 6)) {
+                  if (topic?.Text && topic?.FirstURL) {
+                    results.push({
+                      title: topic.Text.split(' - ')[0] || topic.Text.slice(0, 60),
+                      snippet: topic.Text,
+                      url: topic.FirstURL,
+                      source: searchEngine,
+                    });
+                  }
+                }
+              }
             }
+          } catch {
+            // Public instant-answer lookup unavailable
           }
         }
 
-        // Prefer Wikipedia / directly embeddable result first, otherwise first result URL
-        const preferredResult =
-          results.find((r) => r.source === 'Wikipedia') || results[0];
+        const engineEmbedUrl =
+          searchEngine === 'google'
+            ? `https://www.google.com/search?igu=1&q=${encodeURIComponent(input)}`
+            : searchEngine === 'bing'
+            ? `https://www.bing.com/search?q=${encodeURIComponent(input)}`
+            : '';
 
-        if (preferredResult?.url) {
-          const { url } = normalizeEmbedUrl(preferredResult.url);
+        // Pick the top real web link (never force Wikipedia over web results),
+        // or open the selected embeddable search engine results page when available
+        const preferredUrl = results[0]?.url || engineEmbedUrl;
+        const preferredTitle = results[0]?.title || `${searchEngine.toUpperCase()}: ${input}`;
+
+        if (preferredUrl) {
+          const { url } = normalizeEmbedUrl(preferredUrl);
           setEmbedTabs((prev) =>
             prev.map((t) => {
               if (t.id !== tabId) return t;
               const nextHistory = [...t.history.slice(0, t.historyIndex + 1), url];
               return {
                 ...t,
-                title: preferredResult.title || input,
+                title: preferredTitle,
                 url,
+                faviconUrl: undefined,
+                isPlayingAudio: false,
+                isMuted: false,
                 query: input,
                 results,
                 summary,
@@ -384,20 +531,16 @@ export default function App() {
     });
   };
 
-  if (!isUnlocked) {
-    return (
-      <BackgroundWrapper
-        theme={theme}
-        customWallpaperUrl={customWallpaperUrl}
-        darkMode={darkMode}
-      >
-        <SignInGate
-          logoStyle={logoStyle}
-          onUnlock={() => setIsUnlocked(true)}
-        />
-      </BackgroundWrapper>
-    );
-  }
+  const handleReorderEmbedTabs = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    setEmbedTabs((prev) => {
+      if (fromIndex >= prev.length || toIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }, []);
 
   return (
     <BackgroundWrapper
@@ -411,7 +554,10 @@ export default function App() {
         darkMode={darkMode}
         setDarkMode={setDarkMode}
         logoStyle={logoStyle}
-        onLockGate={handleLockGate}
+        signedInUser={signedInUser}
+        userAvatar={userAvatar}
+        onOpenSignIn={() => setShowSignInModal(true)}
+        onSignOut={handleSignOut}
         embedTabsCount={embedTabs.length}
         onResumeEmbed={() => setIsEmbedOpen(true)}
       />
@@ -433,11 +579,24 @@ export default function App() {
           <GamesTab initialGameId={selectedGameId} />
         )}
 
-        {activeTab === 'music' && <MusicTab />}
+        {activeTab === 'music' && (
+          <MusicTab
+            isSignedIn={Boolean(signedInUser)}
+            onRequireSignIn={() => setShowSignInModal(true)}
+          />
+        )}
 
         {activeTab === 'cinema' && <CinemaTab />}
 
-        {activeTab === 'chat' && <ChatTab />}
+        {activeTab === 'chat' && (
+          <ChatTab
+            isSignedIn={Boolean(signedInUser)}
+            signedInUsername={signedInUser}
+            userAvatar={userAvatar}
+            onRequireSignIn={() => setShowSignInModal(true)}
+            onOpenAvatarSettings={() => setActiveTab('settings')}
+          />
+        )}
 
         {activeTab === 'ai' && (
           <AiAssistantTab
@@ -448,7 +607,10 @@ export default function App() {
 
         {activeTab === 'security' && (
           <SecurityTab
-            onLockGate={handleLockGate}
+            isSignedIn={Boolean(signedInUser)}
+            onOpenSignIn={() => setShowSignInModal(true)}
+            onLockGate={handleSignOut}
+            onOpenAccountSettings={() => setActiveTab('settings')}
             offlineMode={offlineMode}
             setOfflineMode={setOfflineMode}
           />
@@ -472,6 +634,12 @@ export default function App() {
             setTimezone={setTimezone}
             logoStyle={logoStyle}
             setLogoStyle={setLogoStyle}
+            signedInUser={signedInUser}
+            userAvatar={userAvatar}
+            setUserAvatar={setUserAvatar}
+            onOpenSignIn={() => setShowSignInModal(true)}
+            onSignOut={handleSignOut}
+            onUpdateSignedInUser={(newUsername) => setSignedInUser(newUsername)}
           />
         )}
       </main>
@@ -487,7 +655,16 @@ export default function App() {
           onNewTab={handleNewEmbedTab}
           onNavigateInTab={navigateInEmbedTab}
           onUpdateTab={updateEmbedTab}
+          onReorderTabs={handleReorderEmbedTabs}
           onExitToPortal={() => setIsEmbedOpen(false)}
+        />
+      )}
+
+      {showSignInModal && (
+        <SignInGate
+          logoStyle={logoStyle}
+          onUnlock={handleSignInSuccess}
+          onCancel={() => setShowSignInModal(false)}
         />
       )}
     </BackgroundWrapper>

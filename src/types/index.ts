@@ -61,10 +61,11 @@ export interface MovieItem {
 export interface ChatMessage {
   id: string;
   author: string;
+  clientId?: string;
   avatar: string;
   content: string;
   timestamp: string;
-  role?: 'user' | 'bot' | 'mod' | 'admin';
+  role?: 'user' | 'mod' | 'admin';
   reactions?: { [emoji: string]: number };
 }
 
@@ -94,6 +95,9 @@ export interface EmbedTabItem {
   id: string;
   title: string;
   url: string;
+  faviconUrl?: string;
+  isPlayingAudio?: boolean;
+  isMuted?: boolean;
   query?: string;
   isLoading?: boolean;
   results?: EmbedSearchResult[];

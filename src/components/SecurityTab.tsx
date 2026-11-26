@@ -1,20 +1,23 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Lock, Unlock, Download, Upload, CheckCircle2, RefreshCw, KeyRound, Database, WifiOff } from 'lucide-react';
-import { CaptchaModal } from './CaptchaModal';
+import { ShieldCheck, Lock, Unlock, Download, Upload, CheckCircle2, KeyRound, Database, WifiOff, Settings } from 'lucide-react';
 
 interface SecurityTabProps {
+  isSignedIn: boolean;
+  onOpenSignIn: () => void;
   onLockGate: () => void;
+  onOpenAccountSettings: () => void;
   offlineMode: boolean;
   setOfflineMode: (val: boolean) => void;
 }
 
 export const SecurityTab: React.FC<SecurityTabProps> = ({
+  isSignedIn,
+  onOpenSignIn,
   onLockGate,
+  onOpenAccountSettings,
   offlineMode,
   setOfflineMode,
 }) => {
-  const [showCaptchaTest, setShowCaptchaTest] = useState(false);
-  const [captchaStatus, setCaptchaStatus] = useState<string>('Verified Human Session');
   const [exportMessage, setExportMessage] = useState<string>('');
 
   const sessionToken = 'k1ngkell-sec-7f9e3a8d1c2b54';
@@ -92,7 +95,7 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({
           <span>Security & User Data Vault</span>
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-          Smart anti-bot gatekeeper, client-side encryption, and seamless data sync.
+          Password-protected account access, client-side vault backup, and offline caching.
         </p>
       </div>
 
@@ -105,66 +108,79 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({
 
       {/* Grid of Security Tiles */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Anti-Bot Verification Card */}
+        {/* Password Security Card */}
         <div className="p-6 rounded-2xl bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-rose-600" />
+              <KeyRound className="w-5 h-5 text-rose-600" />
               <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                Smart CAPTCHA Sentinel
+                Account Password Security
               </h3>
             </div>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
-              ACTIVE
+              SHA-256
             </span>
           </div>
 
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Multi-stage cognitive and biometric slider verification ensuring automated scrapers and spiders cannot access K1ngkell.
+            Accounts are protected with salted SHA-256 password hashing stored locally in your browser without extra verification steps.
           </p>
 
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs space-y-1">
-            <div className="text-slate-400">Current Session State:</div>
-            <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-              <span>{captchaStatus}</span>
-            </div>
-          </div>
-
           <button
-            onClick={() => setShowCaptchaTest(true)}
-            className="w-full py-2 px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center justify-center gap-2"
+            type="button"
+            onClick={isSignedIn ? onOpenAccountSettings : onOpenSignIn}
+            className="w-full py-2 px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Test CAPTCHA Challenge Model</span>
+            <Settings className="w-3.5 h-3.5" />
+            <span>{isSignedIn ? 'Open Account Settings' : 'Sign In or Create Account'}</span>
           </button>
         </div>
 
-        {/* Gate Lock Controller Card */}
+        {/* Account & Session Status Card */}
         <div className="p-6 rounded-2xl bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Lock className="w-5 h-5 text-blue-600" />
               <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                Gate Lock Controller
+                Session &amp; Access Status
               </h3>
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400">
-              UNLOCKED
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                isSignedIn
+                  ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400'
+              }`}
+            >
+              {isSignedIn ? 'SIGNED IN' : 'SIGNED OUT'}
             </span>
           </div>
 
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Lock the portal immediately. Returning will require solving the human verification challenge or entering your passcode.
+            {isSignedIn
+              ? 'You are signed in with full access to Chat channels and saved music playlists.'
+              : 'You are currently signed out. Sign in with your password to access Chat and save playlists.'}
           </p>
 
-          <button
-            onClick={onLockGate}
-            className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2"
-          >
-            <Lock className="w-4 h-4" />
-            <span>Lock Portal Immediately</span>
-          </button>
+          {isSignedIn ? (
+            <button
+              type="button"
+              onClick={onLockGate}
+              className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Lock className="w-4 h-4" />
+              <span>Sign Out</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenSignIn}
+              className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Unlock className="w-4 h-4" />
+              <span>Sign In</span>
+            </button>
+          )}
         </div>
 
         {/* Offline Cache Mode */}
@@ -177,6 +193,7 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({
               </h3>
             </div>
             <button
+              type="button"
               onClick={() => setOfflineMode(!offlineMode)}
               className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                 offlineMode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
@@ -213,8 +230,9 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({
 
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={handleExportData}
-              className="flex-1 py-2 px-3 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 py-2 px-3 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export Vault</span>
@@ -233,16 +251,6 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({
           </div>
         </div>
       </div>
-
-      {showCaptchaTest && (
-        <CaptchaModal
-          onSuccess={() => {
-            setShowCaptchaTest(false);
-            setCaptchaStatus('Re-verified Human at ' + new Date().toLocaleTimeString());
-          }}
-          onCancel={() => setShowCaptchaTest(false)}
-        />
-      )}
     </div>
   );
 };
