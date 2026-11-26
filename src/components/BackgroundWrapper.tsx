@@ -1,13 +1,6 @@
 import React from 'react';
 import { BackgroundTheme } from '../types';
-
-// Static references to generated background images
-const WALLPAPER_MAP: Record<Exclude<BackgroundTheme, 'dark' | 'custom'>, string> = {
-  'sunny-hill': '/src/assets/images/k1ngkell_sunny_hill_1794001316471.jpg',
-  'sunset-mountain': '/src/assets/images/k1ngkell_sunset_mountain_1794001318108.jpg',
-  'beach': '/src/assets/images/k1ngkell_beach_view_1794001318223.jpg',
-  'city': '/src/assets/images/k1ngkell_city_skyline_1794001318430.jpg',
-};
+import { WALLPAPER_MAP } from '../assets/wallpapers';
 
 interface BackgroundWrapperProps {
   theme: BackgroundTheme;

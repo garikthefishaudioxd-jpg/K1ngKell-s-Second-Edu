@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BackgroundTheme, PrimaryColor, SearchEngine, LogoStyle } from '../types';
 import { Settings, Palette, Clock, Search, Image as ImageIcon, Upload, Shield, Sliders, Check, RotateCcw, Cloud } from 'lucide-react';
 import { Logo } from './Logo';
+import { WALLPAPER_MAP } from '../assets/wallpapers';
 
 interface SettingsTabProps {
   theme: BackgroundTheme;
@@ -103,22 +104,22 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     {
       id: 'sunny-hill',
       name: 'Sunny Hill & Flowers',
-      preview: '/src/assets/images/k1ngkell_sunny_hill_1794001316471.jpg',
+      preview: WALLPAPER_MAP['sunny-hill'],
     },
     {
       id: 'sunset-mountain',
       name: 'Sunset & Mountains',
-      preview: '/src/assets/images/k1ngkell_sunset_mountain_1794001318108.jpg',
+      preview: WALLPAPER_MAP['sunset-mountain'],
     },
     {
       id: 'beach',
       name: 'Paradise Beach',
-      preview: '/src/assets/images/k1ngkell_beach_view_1794001318223.jpg',
+      preview: WALLPAPER_MAP.beach,
     },
     {
       id: 'city',
       name: 'Metropolis City',
-      preview: '/src/assets/images/k1ngkell_city_skyline_1794001318430.jpg',
+      preview: WALLPAPER_MAP.city,
     },
     {
       id: 'dark',
@@ -429,11 +430,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
           <Cloud className="w-4 h-4 text-blue-500" />
           <h3 className="font-bold text-xs uppercase tracking-wider">
-            Static Hosting & AWS S3 Compatibility
+            GitHub Pages & Static Hosting Ready
           </h3>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          The K1ngkell web app is optimized for seamless zero-dependency deployment to static website hosting buckets such as <code className="font-mono text-blue-500">s3.amazonaws.com</code>, Cloud Run, GitHub Pages, or Vercel using <code className="font-mono text-rose-500">npm run build</code>.
+          K1ngkell builds with relative asset paths (<code className="font-mono text-rose-500">base: &apos;./&apos;</code>) so the compiled <code className="font-mono text-blue-500">dist/</code> bundle from <code className="font-mono text-rose-500">npm run build</code> works seamlessly on GitHub Pages (<code className="font-mono text-blue-500">gh-pages</code> or GitHub Actions setup in repository Settings → Pages) as well as static buckets like <code className="font-mono text-blue-500">s3.amazonaws.com</code>.
         </p>
       </div>
     </div>

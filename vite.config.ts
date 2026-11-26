@@ -202,6 +202,7 @@ function geminiApiPlugin(): Plugin {
 
 export default defineConfig(() => {
   return {
+    base: './',
     plugins: [react(), tailwindcss(), geminiApiPlugin()],
     resolve: {
       alias: {

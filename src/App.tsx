@@ -242,18 +242,65 @@ export default function App() {
       });
 
       try {
-        const res = await fetch('/api/web-search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: input, engine: searchEngine }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Search failed');
+        let results: EmbedSearchResult[] = [];
+        let summary = '';
+        let serverSearchSucceeded = false;
+
+        try {
+          const res = await fetch('/api/web-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: input, engine: searchEngine }),
+          });
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/json')) {
+            const data = await res.json();
+            results = Array.isArray(data.results) ? data.results : [];
+            summary = data.instantSummary || '';
+            serverSearchSucceeded = true;
+          }
+        } catch {
+          // Static hosting (e.g. GitHub Pages) has no /api server route
         }
 
-        const results: EmbedSearchResult[] = Array.isArray(data.results) ? data.results : [];
-        const summary: string = data.instantSummary || '';
+        if (!serverSearchSucceeded) {
+          const wikiRes = await fetch(
+            `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(
+              input
+            )}&limit=6&namespace=0&format=json&origin=*`
+          );
+          if (wikiRes.ok) {
+            const wikiData = await wikiRes.json();
+            if (Array.isArray(wikiData) && Array.isArray(wikiData[1])) {
+              const titles: string[] = wikiData[1];
+              const descriptions: string[] = wikiData[2] || [];
+              const urls: string[] = wikiData[3] || [];
+              results = titles
+                .map((title, i) => ({
+                  title,
+                  snippet: descriptions[i] || `Encyclopedia entry for ${title}.`,
+                  url: urls[i] || '',
+                  source: 'Wikipedia',
+                }))
+                .filter((r) => Boolean(r.url));
+            }
+          }
+          if (results[0]?.title) {
+            try {
+              const sumRes = await fetch(
+                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+                  results[0].title
+                )}`
+              );
+              if (sumRes.ok) {
+                const sumData = await sumRes.json();
+                if (sumData.extract) summary = sumData.extract;
+              }
+            } catch {
+              // Summary is optional
+            }
+          }
+        }
 
         // Prefer Wikipedia / directly embeddable result first, otherwise first result URL
         const preferredResult =

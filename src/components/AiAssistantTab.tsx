@@ -47,23 +47,74 @@ export const AiAssistantTab: React.FC<AiAssistantTabProps> = ({
     setError(null);
 
     try {
-      const res = await fetch('/api/gemini/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text.trim(),
-          customApiKey: customApiKey || undefined,
-        }),
-      });
+      let replyText = '';
+      let usedServer = false;
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to communicate with AI model.');
+      try {
+        const res = await fetch('/api/gemini/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text.trim(),
+            customApiKey: customApiKey || undefined,
+          }),
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error || 'Failed to communicate with AI model.');
+          }
+          replyText = data.text || 'No response generated.';
+          usedServer = true;
+        }
+      } catch (serverErr: any) {
+        if (serverErr?.message && !serverErr.message.includes('Unexpected token')) {
+          // Only rethrow genuine JSON API errors, not 404 HTML responses from static hosts
+          if (serverErr.message !== 'Failed to fetch') {
+            throw serverErr;
+          }
+        }
+      }
+
+      if (!usedServer) {
+        if (!customApiKey) {
+          throw new Error(
+            'Static hosting (GitHub Pages) does not have a backend server. Click "Use Own API Key" above and enter your Gemini API key to chat here.'
+          );
+        }
+
+        const directRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(
+            customApiKey
+          )}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: text.trim() }] }],
+              systemInstruction: {
+                parts: [
+                  {
+                    text: 'You are K1ngkell AI, a friendly, knowledgeable gaming, music, streaming, and creative digital companion.',
+                  },
+                ],
+              },
+            }),
+          }
+        );
+
+        const directData = await directRes.json();
+        if (!directRes.ok) {
+          throw new Error(directData?.error?.message || 'Gemini API request failed.');
+        }
+        replyText =
+          directData?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
       }
 
       const assistantMsg: AiMessage = {
         role: 'assistant',
-        content: data.text || 'No response generated.',
+        content: replyText,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
