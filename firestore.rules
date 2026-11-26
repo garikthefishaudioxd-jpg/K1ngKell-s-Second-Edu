@@ -1,0 +1,302 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerified() && request.auth.uid == userId;
+    }
+
+    function isAllowedChannel(channelId) {
+      return channelId in ['general', 'gaming-lounge', 'music-vibes', 'tech-chat', 'announcements'];
+    }
+
+    function isValidPublicProfile(data, userId) {
+      return data.keys().hasAll([
+        'uid',
+        'username',
+        'bio',
+        'avatar',
+        'online',
+        'lastSeenAt',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid',
+        'username',
+        'bio',
+        'avatar',
+        'online',
+        'lastSeenAt',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.uid == userId &&
+      isValidId(data.uid) &&
+      data.username is string && data.username.size() >= 2 && data.username.size() <= 32 &&
+      data.bio is string && data.bio.size() <= 160 &&
+      data.avatar is string && data.avatar.size() <= 24000 &&
+      data.online is bool &&
+      data.lastSeenAt is timestamp &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateAccount(data, userId) {
+      return data.keys().hasAll([
+        'uid',
+        'email',
+        'displayName',
+        'likedTrackIds',
+        'customTracks',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid',
+        'email',
+        'displayName',
+        'likedTrackIds',
+        'customTracks',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.uid == userId &&
+      isValidId(data.uid) &&
+      data.email is string && data.email.size() <= 254 &&
+      data.displayName is string && data.displayName.size() <= 64 &&
+      data.likedTrackIds is list && data.likedTrackIds.size() <= 200 &&
+      (data.likedTrackIds.size() == 0 || (data.likedTrackIds[0] is string && data.likedTrackIds[0].size() <= 128)) &&
+      data.customTracks is list && data.customTracks.size() <= 50 &&
+      (data.customTracks.size() == 0 || (data.customTracks[0] is map && data.customTracks[0].keys().hasOnly(['id', 'title', 'artist', 'duration', 'genre', 'embedUrl', 'artwork', 'isLiked']))) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidChatChannel(data, channelId) {
+      return data.keys().hasAll(['id', 'name', 'description', 'createdBy', 'createdAt']) &&
+      data.keys().hasOnly(['id', 'name', 'description', 'createdBy', 'createdAt']) &&
+      data.id == channelId &&
+      isValidId(channelId) &&
+      isAllowedChannel(channelId) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 32 &&
+      data.description is string && data.description.size() <= 200 &&
+      data.createdBy is string && isValidId(data.createdBy) &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidChatMessage(data, channelId, messageId) {
+      return data.keys().hasAll([
+        'id',
+        'channelId',
+        'authorUid',
+        'author',
+        'avatar',
+        'content',
+        'timestamp',
+        'reactions',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'channelId',
+        'authorUid',
+        'author',
+        'avatar',
+        'content',
+        'timestamp',
+        'reactions',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.id == messageId &&
+      isValidId(messageId) &&
+      data.channelId == channelId &&
+      isAllowedChannel(channelId) &&
+      data.authorUid is string && isValidId(data.authorUid) &&
+      data.author is string && data.author.size() >= 1 && data.author.size() <= 32 &&
+      data.avatar is string && data.avatar.size() <= 24000 &&
+      data.content is string && data.content.size() >= 1 && data.content.size() <= 2000 &&
+      data.timestamp is string && data.timestamp.size() >= 1 && data.timestamp.size() <= 40 &&
+      data.reactions is map && data.reactions.keys().size() <= 10 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidTypingStatus(data, channelId, userId) {
+      return data.keys().hasAll(['uid', 'channelId', 'username', 'isTyping', 'updatedAt']) &&
+      data.keys().hasOnly(['uid', 'channelId', 'username', 'isTyping', 'updatedAt']) &&
+      data.uid == userId &&
+      isValidId(userId) &&
+      data.channelId == channelId &&
+      isAllowedChannel(channelId) &&
+      data.username is string && data.username.size() >= 1 && data.username.size() <= 32 &&
+      data.isTyping is bool &&
+      data.updatedAt is timestamp;
+    }
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    match /publicProfiles/{userId} {
+      allow get: if isVerified() && isValidId(userId);
+      allow list: if isVerified() && resource.data.uid is string && resource.data.uid.size() <= 128;
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidPublicProfile(incoming(), userId) &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        incoming().lastSeenAt == request.time;
+      allow update: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidPublicProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'username',
+            'bio',
+            'avatar',
+            'online',
+            'lastSeenAt',
+            'updatedAt'
+          ]) ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'online',
+            'lastSeenAt',
+            'updatedAt'
+          ])
+        );
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if isVerified() && resource.data.uid == request.auth.uid;
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidPrivateAccount(incoming(), userId) &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidPrivateAccount(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'email',
+          'displayName',
+          'likedTrackIds',
+          'customTracks',
+          'updatedAt'
+        ]);
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+
+    match /chatChannels/{channelId} {
+      allow get: if isVerified() && isValidId(channelId) && isAllowedChannel(channelId);
+      allow list: if isVerified() && isAllowedChannel(resource.data.id);
+      allow create: if isVerified() &&
+        isValidId(channelId) &&
+        isValidChatChannel(incoming(), channelId) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time;
+
+      match /messages/{messageId} {
+        allow get: if isVerified() &&
+          isValidId(channelId) &&
+          isValidId(messageId) &&
+          isAllowedChannel(channelId) &&
+          exists(/databases/$(database)/documents/chatChannels/$(channelId));
+        allow list: if isVerified() && isAllowedChannel(resource.data.channelId);
+        allow create: if isVerified() &&
+          isValidId(channelId) &&
+          isValidId(messageId) &&
+          isValidChatMessage(incoming(), channelId, messageId) &&
+          incoming().authorUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/chatChannels/$(channelId));
+        allow update: if isVerified() &&
+          isValidId(channelId) &&
+          isValidId(messageId) &&
+          isValidChatMessage(incoming(), channelId, messageId) &&
+          existing().authorUid is string &&
+          incoming().authorUid == existing().authorUid &&
+          incoming().id == existing().id &&
+          incoming().channelId == existing().channelId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/chatChannels/$(channelId)) &&
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'updatedAt']) ||
+            (
+              existing().authorUid == request.auth.uid &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['content', 'avatar', 'updatedAt'])
+            )
+          );
+        allow delete: if isVerified() &&
+          isValidId(channelId) &&
+          isValidId(messageId) &&
+          existing().authorUid == request.auth.uid &&
+          exists(/databases/$(database)/documents/chatChannels/$(channelId));
+      }
+
+      match /typing/{userId} {
+        allow get: if isVerified() &&
+          isValidId(channelId) &&
+          isValidId(userId) &&
+          isAllowedChannel(channelId) &&
+          exists(/databases/$(database)/documents/chatChannels/$(channelId));
+        allow list: if isVerified() && isAllowedChannel(resource.data.channelId);
+        allow create: if isOwner(userId) &&
+          isValidId(channelId) &&
+          isValidId(userId) &&
+          isValidTypingStatus(incoming(), channelId, userId) &&
+          incoming().uid == request.auth.uid &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/chatChannels/$(channelId));
+        allow update: if isOwner(userId) &&
+          isValidId(channelId) &&
+          isValidId(userId) &&
+          isValidTypingStatus(incoming(), channelId, userId) &&
+          incoming().uid == existing().uid &&
+          incoming().channelId == existing().channelId &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['username', 'isTyping', 'updatedAt']) &&
+          exists(/databases/$(database)/documents/chatChannels/$(channelId));
+        allow delete: if isOwner(userId) && isValidId(channelId) && isValidId(userId);
+      }
+    }
+  }
+}

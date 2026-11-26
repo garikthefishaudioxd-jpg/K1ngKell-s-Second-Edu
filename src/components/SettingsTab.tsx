@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { BackgroundTheme, PrimaryColor, SearchEngine, LogoStyle } from '../types';
+import { signInWithPopup } from 'firebase/auth';
+import { BackgroundTheme, PrimaryColor, SearchEngine, LogoStyle, TrackItem } from '../types';
 import {
   Settings,
   Palette,
@@ -20,14 +21,25 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { Logo } from './Logo';
+import { GoogleGIcon } from './GoogleGIcon';
 import { UserAvatar, AVATAR_PRESETS, resizeAvatarImage } from './UserAvatar';
 import { WALLPAPER_MAP } from '../assets/wallpapers';
+import { MUSIC_CATALOG } from '../data/music';
+import { auth, googleProvider } from '../firebase';
 import {
   changeAccountPassword,
   deleteAccount,
   getAccount,
+  syncLocalAccountFromGoogle,
   updateAccountProfile,
 } from '../utils/accountAuth';
+import {
+  deleteFirestoreAccount,
+  linkAccountToGoogleInFirestore,
+  runWithGoogleLinkLock,
+  syncGoogleUserAccounts,
+  updateFirestorePublicProfile,
+} from '../services/firebaseAccountService';
 
 interface SettingsTabProps {
   theme: BackgroundTheme;
@@ -52,6 +64,17 @@ interface SettingsTabProps {
   onOpenSignIn: () => void;
   onSignOut: () => void;
   onUpdateSignedInUser: (username: string) => void;
+  firebaseUid?: string | null;
+  firebaseEmail?: string | null;
+  userBio?: string;
+  onUpdateUserBio?: (bio: string) => void;
+  onGoogleAccountSignedIn?: (payload: {
+    uid: string;
+    email: string;
+    username: string;
+    bio: string;
+    avatar: string;
+  }) => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -77,23 +100,35 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onOpenSignIn,
   onSignOut,
   onUpdateSignedInUser,
+  firebaseUid = null,
+  firebaseEmail = null,
+  userBio = '',
+  onUpdateUserBio,
+  onGoogleAccountSignedIn,
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [saveBanner, setSaveBanner] = useState<boolean>(false);
 
   // Account Settings State
-  const existingAccount = signedInUser ? getAccount(signedInUser) : null;
+  const existingAccount = signedInUser && !firebaseUid ? getAccount(signedInUser) : null;
   const [accountUsername, setAccountUsername] = useState<string>(signedInUser || '');
-  const [accountBio, setAccountBio] = useState<string>(existingAccount?.bio || '');
+  const [accountBio, setAccountBio] = useState<string>(
+    firebaseUid ? userBio : existingAccount?.bio || ''
+  );
   const [currentPassword, setCurrentPassword] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmNewPassword, setConfirmNewPassword] = useState<string>('');
   const [showPasswords, setShowPasswords] = useState<boolean>(false);
   const [accountMessage, setAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<boolean>(false);
+  const [savingProfile, setSavingProfile] = useState<boolean>(false);
+  const [googleBusy, setGoogleBusy] = useState<boolean>(false);
 
   useEffect(() => {
-    if (signedInUser) {
+    if (firebaseUid) {
+      setAccountUsername(signedInUser || '');
+      setAccountBio(userBio || '');
+    } else if (signedInUser) {
       const acct = getAccount(signedInUser);
       setAccountUsername(signedInUser);
       setAccountBio(acct?.bio || '');
@@ -106,7 +141,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setConfirmNewPassword('');
     setConfirmDeleteOpen(false);
     setAccountMessage(null);
-  }, [signedInUser]);
+  }, [signedInUser, firebaseUid, userBio]);
 
   const timezones = [
     { label: 'UTC (Coordinated Universal Time)', value: 'UTC' },
@@ -163,9 +198,134 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setTimeout(() => setSaveBanner(false), 2500);
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const formatAccountError = (err: unknown, fallback: string): string => {
+    if (!(err instanceof Error)) return fallback;
+    try {
+      const parsed = JSON.parse(err.message);
+      if (parsed && typeof parsed.error === 'string') return parsed.error;
+    } catch {
+      // plain error message
+    }
+    return err.message || fallback;
+  };
+
+  const readLocalMusicForSync = (): { likedTrackIds: string[]; customTracks: TrackItem[] } => {
+    try {
+      const raw = localStorage.getItem('k1ngkell_music_library');
+      if (!raw) return { likedTrackIds: [], customTracks: [] };
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return { likedTrackIds: [], customTracks: [] };
+      const catalogIds = new Set(MUSIC_CATALOG.map((t) => t.id));
+      const likedTrackIds = parsed
+        .filter((t) => t && typeof t.id === 'string' && Boolean(t.isLiked))
+        .map((t) => String(t.id));
+      const customTracks = parsed.filter(
+        (t): t is TrackItem => Boolean(t && typeof t.id === 'string' && !catalogIds.has(t.id))
+      );
+      return { likedTrackIds, customTracks };
+    } catch {
+      return { likedTrackIds: [], customTracks: [] };
+    }
+  };
+
+  const handleGoogleSignInOrLink = async () => {
+    setAccountMessage(null);
+    setGoogleBusy(true);
+    try {
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+      if (!signedInUser) {
+        const synced = await runWithGoogleLinkLock(async () => {
+          const result = await signInWithPopup(auth, googleProvider);
+          const data = await syncGoogleUserAccounts(result.user);
+          return {
+            uid: result.user.uid,
+            email: data.privateAccount.email || result.user.email || '',
+            username: data.publicProfile.username,
+            bio: data.publicProfile.bio || '',
+            avatar: data.publicProfile.avatar || userAvatar,
+          };
+        });
+        onGoogleAccountSignedIn?.(synced);
+        setAccountMessage({
+          type: 'success',
+          text: `Signed in with Google as ${synced.username}!`,
+        });
+        return;
+      }
+
+      const targetUsername = accountUsername.trim().slice(0, 32) || signedInUser;
+      const targetBio = accountBio.trim().slice(0, 160);
+      const { likedTrackIds, customTracks } = readLocalMusicForSync();
+
+      const linked = await runWithGoogleLinkLock(async () => {
+        const result = await signInWithPopup(auth, googleProvider);
+        const data = await linkAccountToGoogleInFirestore(result.user, {
+          previousUsername: signedInUser,
+          username: targetUsername,
+          bio: targetBio,
+          avatar: userAvatar,
+          likedTrackIds,
+          customTracks,
+        });
+        return {
+          uid: result.user.uid,
+          email: data.privateAccount.email || result.user.email || '',
+          username: data.publicProfile.username,
+          bio: data.publicProfile.bio || '',
+          avatar: data.publicProfile.avatar || userAvatar,
+        };
+      });
+
+      onGoogleAccountSignedIn?.(linked);
+      setAccountMessage({
+        type: 'success',
+        text: `Your account "${linked.username}" is now linked and signed in with Google!`,
+      });
+    } catch (err) {
+      const msg = formatAccountError(err, 'Unable to sign in with Google.');
+      if (!/popup-closed-by-user|cancelled-popup-request/i.test(msg)) {
+        setAccountMessage({ type: 'error', text: msg });
+      }
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!signedInUser) return;
+
+    if (firebaseUid) {
+      const cleanedName = accountUsername.trim().slice(0, 32);
+      const cleanedBio = accountBio.trim().slice(0, 160);
+      setSavingProfile(true);
+      try {
+        await updateFirestorePublicProfile(firebaseUid, {
+          username: cleanedName,
+          bio: cleanedBio,
+        });
+        syncLocalAccountFromGoogle({
+          googleUid: firebaseUid,
+          googleEmail: firebaseEmail || '',
+          username: cleanedName,
+          bio: cleanedBio,
+          avatar: userAvatar,
+        });
+        onUpdateSignedInUser(cleanedName);
+        onUpdateUserBio?.(cleanedBio);
+        setAccountMessage({ type: 'success', text: 'Firebase profile saved.' });
+      } catch (err) {
+        setAccountMessage({
+          type: 'error',
+          text: formatAccountError(err, 'Failed to save Firebase profile.'),
+        });
+      } finally {
+        setSavingProfile(false);
+      }
+      return;
+    }
+
     const res = updateAccountProfile(signedInUser, {
       newUsername: accountUsername,
       bio: accountBio,
@@ -180,7 +340,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signedInUser) return;
+    if (!signedInUser || firebaseUid) return;
     if (newPassword !== confirmNewPassword) {
       setAccountMessage({ type: 'error', text: 'New passwords do not match.' });
       return;
@@ -196,8 +356,22 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setAccountMessage({ type: 'success', text: 'Account password updated.' });
   };
 
-  const handleDeleteAccount = () => {
+  const handleDeleteAccount = async () => {
     if (!signedInUser) return;
+    if (firebaseUid) {
+      try {
+        await deleteFirestoreAccount(firebaseUid);
+      } catch (err) {
+        setAccountMessage({
+          type: 'error',
+          text: formatAccountError(err, 'Failed to delete Firebase account data.'),
+        });
+        return;
+      }
+      setConfirmDeleteOpen(false);
+      onSignOut();
+      return;
+    }
     deleteAccount(signedInUser);
     setConfirmDeleteOpen(false);
     onSignOut();
@@ -205,7 +379,21 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   const handleSelectAvatar = (nextAvatar: string) => {
     setUserAvatar(nextAvatar);
-    if (signedInUser) {
+    if (firebaseUid) {
+      syncLocalAccountFromGoogle({
+        googleUid: firebaseUid,
+        googleEmail: firebaseEmail || '',
+        username: signedInUser || accountUsername || 'Member',
+        bio: accountBio,
+        avatar: nextAvatar,
+      });
+      void updateFirestorePublicProfile(firebaseUid, { avatar: nextAvatar }).catch((err) => {
+        setAccountMessage({
+          type: 'error',
+          text: formatAccountError(err, 'Could not sync avatar to Firebase.'),
+        });
+      });
+    } else if (signedInUser) {
       updateAccountProfile(signedInUser, { avatar: nextAvatar });
     }
     setAccountMessage({ type: 'success', text: 'Chat & profile avatar updated!' });
@@ -291,21 +479,31 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {signedInUser
-                  ? `Signed in as ${signedInUser}`
+                  ? firebaseUid
+                    ? `Signed in with Google as ${signedInUser}${firebaseEmail ? ` (${firebaseEmail})` : ''}`
+                    : `Signed in as ${signedInUser}`
                   : 'Sign in to customize your profile, change your password, and sync playlists.'}
               </p>
             </div>
           </div>
 
-          <span
-            className={`text-[10px] font-bold px-2.5 py-1 rounded-lg self-start sm:self-center ${
-              signedInUser
-                ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400'
-                : 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400'
-            }`}
-          >
-            {signedInUser ? 'SIGNED IN' : 'SIGNED OUT'}
-          </span>
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            {firebaseUid && (
+              <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center gap-1">
+                <Cloud className="w-3 h-3" />
+                <span>Firebase Cloud Account</span>
+              </span>
+            )}
+            <span
+              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg ${
+                signedInUser
+                  ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400'
+              }`}
+            >
+              {signedInUser ? 'SIGNED IN' : 'SIGNED OUT'}
+            </span>
+          </div>
         </div>
 
         {accountMessage && (
@@ -328,16 +526,27 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         {!signedInUser ? (
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              You are currently signed out. Sign in or create an account with a password to manage your profile, join Chat, and save playlists.
+              You are currently signed out. Sign in with Google or a local account to manage your profile, join Chat, and save playlists.
             </p>
-            <button
-              type="button"
-              onClick={onOpenSignIn}
-              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 transition-colors cursor-pointer"
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Sign In / Create Account</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleGoogleSignInOrLink}
+                disabled={googleBusy}
+                className="px-4 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+              >
+                <GoogleGIcon className="w-3.5 h-3.5 shrink-0" />
+                <span>{googleBusy ? 'Signing in...' : 'Sign in with Google'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onOpenSignIn}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In / Create Account</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-6">
@@ -386,83 +595,154 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
                 <button
                   type="submit"
-                  className="w-full py-2 px-3 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors cursor-pointer"
+                  disabled={savingProfile}
+                  className="w-full py-2 px-3 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-xl transition-colors cursor-pointer"
                 >
-                  Save Profile
+                  {savingProfile ? 'Saving...' : firebaseUid ? 'Save Cloud Profile' : 'Save Profile'}
                 </button>
               </form>
 
-              {/* Change Password Form */}
-              <form onSubmit={handleChangePassword} className="space-y-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <KeyRound className="w-3.5 h-3.5 text-rose-500" />
-                    <span>Change Password</span>
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowPasswords((prev) => !prev)}
-                    className="text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 flex items-center gap-1 cursor-pointer"
-                  >
-                    {showPasswords ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                    <span>{showPasswords ? 'Hide' : 'Show'}</span>
-                  </button>
+              {firebaseUid ? (
+                <div className="space-y-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <GoogleGIcon className="w-3.5 h-3.5 shrink-0" />
+                      <span>Google Authentication &amp; Cloud Sync</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                      Signed in with Google{firebaseEmail ? ` (${firebaseEmail})` : ''}. Whenever you sign in with Google, you automatically sign right into <strong className="text-slate-800 dark:text-slate-200">{signedInUser}</strong>.
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                      Your display name, bio, avatar, real-time Chat messages, and Music favorites sync automatically with Firebase Firestore.
+                    </p>
+                  </div>
+                  <div className="space-y-2.5">
+                    <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                      <span>Signed in with Google &amp; Connected to Firestore</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignInOrLink}
+                      disabled={googleBusy}
+                      className="w-full py-2 px-3 text-xs font-semibold text-slate-800 dark:text-white bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                    >
+                      <GoogleGIcon className="w-3.5 h-3.5 shrink-0" />
+                      <span>{googleBusy ? 'Connecting Google...' : 'Switch Google Account'}</span>
+                    </button>
+                  </div>
                 </div>
+              ) : (
+                /* Change Password Form (Local Browser Accounts) */
+                <form onSubmit={handleChangePassword} className="space-y-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <KeyRound className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Change Password</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswords((prev) => !prev)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                    >
+                      {showPasswords ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      <span>{showPasswords ? 'Hide' : 'Show'}</span>
+                    </button>
+                  </div>
 
-                {existingAccount?.passwordHash && (
+                  {existingAccount?.passwordHash && (
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Current Password
+                      </label>
+                      <input
+                        type={showPasswords ? 'text' : 'password'}
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        placeholder="Enter current password"
+                        autoComplete="current-password"
+                        className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+                      />
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                      Current Password
+                      New Password
                     </label>
                     <input
                       type={showPasswords ? 'text' : 'password'}
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                      placeholder="Enter current password"
-                      autoComplete="current-password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="At least 4 characters"
+                      autoComplete="new-password"
+                      required
                       className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
                     />
                   </div>
-                )}
 
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    New Password
-                  </label>
-                  <input
-                    type={showPasswords ? 'text' : 'password'}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="At least 4 characters"
-                    autoComplete="new-password"
-                    required
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="Confirm new password"
+                      autoComplete="new-password"
+                      required
+                      className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    Confirm New Password
-                  </label>
-                  <input
-                    type={showPasswords ? 'text' : 'password'}
-                    value={confirmNewPassword}
-                    onChange={(e) => setConfirmNewPassword(e.target.value)}
-                    placeholder="Confirm new password"
-                    autoComplete="new-password"
-                    required
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
-                  />
+                  <button
+                    type="submit"
+                    className="w-full py-2 px-3 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Update Password
+                  </button>
+                </form>
+              )}
+            </div>
+
+            {!firebaseUid && (
+              <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <GoogleGIcon className="w-4 h-4 shrink-0" />
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                      {existingAccount?.googleUid
+                        ? 'Google Sign-In Linked to This Account'
+                        : 'Make This Account Signed In with Google'}
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                    {existingAccount?.googleUid
+                      ? `This account (${signedInUser}) is linked to ${
+                          existingAccount.googleEmail || 'your Google account'
+                        }. Sign in with Google to activate cloud sync and live Firebase Chat.`
+                      : `Sign in with Google here to connect your Google account to "${signedInUser}". Your username, avatar, bio, and saved playlists will sync so signing in with Google signs you right into this account.`}
+                  </p>
                 </div>
 
                 <button
-                  type="submit"
-                  className="w-full py-2 px-3 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors cursor-pointer"
+                  type="button"
+                  onClick={handleGoogleSignInOrLink}
+                  disabled={googleBusy}
+                  className="px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold flex items-center justify-center gap-2 shrink-0 shadow-xs transition-colors cursor-pointer disabled:opacity-60"
                 >
-                  Update Password
+                  <GoogleGIcon className="w-4 h-4 shrink-0" />
+                  <span>
+                    {googleBusy
+                      ? 'Signing in with Google...'
+                      : existingAccount?.googleUid
+                      ? 'Sign in with Google'
+                      : 'Sign in with Google & Link'}
+                  </span>
                 </button>
-              </form>
-            </div>
+              </div>
+            )}
 
             {/* Session & Account Management Footer */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">

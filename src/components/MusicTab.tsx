@@ -4,9 +4,14 @@ import { MUSIC_CATALOG } from '../data/music';
 import { Music2, Search, Heart, Play, Plus, Lock, LogIn } from 'lucide-react';
 import { AmbientSoundMixer } from './AmbientSoundMixer';
 import { SafeImage } from './SafeImage';
+import {
+  getFirestorePrivateAccount,
+  updateFirestoreMusicLibrary,
+} from '../services/firebaseAccountService';
 
 interface MusicTabProps {
   isSignedIn: boolean;
+  firebaseUid?: string | null;
   onRequireSignIn: () => void;
 }
 
@@ -22,7 +27,11 @@ const loadSavedLibrary = (): TrackItem[] => {
   return MUSIC_CATALOG;
 };
 
-export const MusicTab: React.FC<MusicTabProps> = ({ isSignedIn, onRequireSignIn }) => {
+export const MusicTab: React.FC<MusicTabProps> = ({
+  isSignedIn,
+  firebaseUid,
+  onRequireSignIn,
+}) => {
   const [tracks, setTracks] = useState<TrackItem[]>(() =>
     isSignedIn ? loadSavedLibrary() : MUSIC_CATALOG.map((t) => ({ ...t, isLiked: false }))
   );
@@ -36,18 +45,62 @@ export const MusicTab: React.FC<MusicTabProps> = ({ isSignedIn, onRequireSignIn 
   const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isSignedIn) {
-      const saved = loadSavedLibrary();
-      setTracks(saved);
-      setActiveTrack((prev) => saved.find((t) => t.id === prev.id) || saved[0] || MUSIC_CATALOG[0]);
-      setAuthNotice(null);
-    } else {
+    if (!isSignedIn) {
       const catalogOnly = MUSIC_CATALOG.map((t) => ({ ...t, isLiked: false }));
       setTracks(catalogOnly);
       setShowOnlyLiked(false);
       setActiveTrack((prev) => catalogOnly.find((t) => t.id === prev.id) || catalogOnly[0]);
+      return;
     }
-  }, [isSignedIn]);
+
+    const saved = loadSavedLibrary();
+    setTracks(saved);
+    setActiveTrack((prev) => saved.find((t) => t.id === prev.id) || saved[0] || MUSIC_CATALOG[0]);
+    setAuthNotice(null);
+
+    if (firebaseUid) {
+      getFirestorePrivateAccount(firebaseUid)
+        .then((privateAcct) => {
+          if (!privateAcct) return;
+          const likedSet = new Set(privateAcct.likedTrackIds || []);
+          const customList = Array.isArray(privateAcct.customTracks)
+            ? privateAcct.customTracks
+            : [];
+          const mergedCatalog = MUSIC_CATALOG.map((t) => ({
+            ...t,
+            isLiked: likedSet.has(t.id),
+          }));
+          const customIds = new Set(customList.map((c) => c.id));
+          const merged = [
+            ...customList.map((c) => ({ ...c, isLiked: likedSet.has(c.id) || Boolean(c.isLiked) })),
+            ...mergedCatalog.filter((t) => !customIds.has(t.id)),
+          ];
+          setTracks(merged);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          } catch {
+            // ignore storage errors
+          }
+        })
+        .catch(() => {
+          // Handled via ErrorBoundary or fallback
+        });
+    }
+  }, [isSignedIn, firebaseUid]);
+
+  const persistTracks = (updated: TrackItem[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore storage errors
+    }
+    if (firebaseUid) {
+      const likedIds = updated.filter((t) => t.isLiked).map((t) => t.id);
+      const catalogIds = new Set(MUSIC_CATALOG.map((t) => t.id));
+      const customTracks = updated.filter((t) => !catalogIds.has(t.id));
+      void updateFirestoreMusicLibrary(firebaseUid, likedIds, customTracks);
+    }
+  };
 
   const requireAuth = (actionLabel: string) => {
     setAuthNotice(`You are signed out. Sign in to ${actionLabel}.`);
@@ -68,11 +121,7 @@ export const MusicTab: React.FC<MusicTabProps> = ({ isSignedIn, onRequireSignIn 
     if (activeTrack.id === id) {
       setActiveTrack({ ...activeTrack, isLiked: !activeTrack.isLiked });
     }
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch {
-      // ignore storage errors
-    }
+    persistTracks(updated);
   };
 
   const handleToggleSavedPlaylist = () => {
@@ -110,11 +159,7 @@ export const MusicTab: React.FC<MusicTabProps> = ({ isSignedIn, onRequireSignIn 
     setActiveTrack(newTrack);
     setCustomUrl('');
     setCustomTitle('');
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch {
-      // ignore storage errors
-    }
+    persistTracks(updated);
   };
 
   const genres = ['all', 'Lo-Fi Chill', 'Synthwave', 'EDM / Gaming', 'Chillhop', 'Dark Ambient'];

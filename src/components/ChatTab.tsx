@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ChatMessage } from '../types';
-import { Hash, Send, Users, Edit2, Check, Trash2, MessageSquare, Lock, LogIn, Sparkles } from 'lucide-react';
+import { Hash, Send, Users, Edit2, Check, Trash2, MessageSquare, Lock, LogIn, Sparkles, Cloud, AlertCircle } from 'lucide-react';
 import { UserAvatar } from './UserAvatar';
 import { loadAccounts } from '../utils/accountAuth';
+import {
+  subscribePublicProfiles,
+  updateFirestorePublicProfile,
+} from '../services/firebaseAccountService';
+import {
+  deleteFirestoreMessage,
+  reactFirestoreMessage,
+  sendFirestoreMessage,
+  setFirestoreTypingStatus,
+  subscribeChannelMessages,
+  subscribeChannelTyping,
+} from '../services/firebaseChatService';
 
 interface Channel {
   id: string;
@@ -80,6 +92,8 @@ interface ChatTabProps {
   userAvatar: string;
   onRequireSignIn: () => void;
   onOpenAvatarSettings?: () => void;
+  firebaseUid?: string | null;
+  onUpdateSignedInUser?: (username: string) => void;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -88,10 +102,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   userAvatar,
   onRequireSignIn,
   onOpenAvatarSettings,
+  firebaseUid = null,
+  onUpdateSignedInUser,
 }) => {
-  const clientId = useMemo(() => getOrCreateClientId(signedInUsername), [signedInUsername]);
+  const localClientId = useMemo(() => getOrCreateClientId(signedInUsername), [signedInUsername]);
+  const clientId = firebaseUid || localClientId;
+
   const [username, setUsername] = useState<string>(
-    () => signedInUsername || getOrCreateUsername(clientId)
+    () => signedInUsername || getOrCreateUsername(localClientId)
   );
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(username);
@@ -107,13 +125,17 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     const saved = localStorage.getItem(CHAT_CHANNEL_STORAGE_KEY);
     return saved && CHANNELS.some((c) => c.id === saved) ? saved : 'general';
   });
-  const [messages, setMessages] = useState<Record<string, ChatMessage[]>>(() =>
+  const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>(() =>
     loadSavedMessages()
   );
+  const [firebaseMessages, setFirebaseMessages] = useState<Record<string, ChatMessage[]>>({});
+  const messages = firebaseUid ? firebaseMessages : localMessages;
+
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([
     { clientId, username, avatar: userAvatar },
   ]);
   const [serverOfflineUsers, setServerOfflineUsers] = useState<OnlineUser[]>([]);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   useEffect(() => {
     setOnlineUsers([{ clientId, username, avatar: userAvatar }]);
@@ -140,20 +162,117 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   }, [selectedChannel]);
 
   useEffect(() => {
+    if (firebaseUid) return;
     try {
-      localStorage.setItem(CHAT_MESSAGES_STORAGE_KEY, JSON.stringify(messages));
+      localStorage.setItem(CHAT_MESSAGES_STORAGE_KEY, JSON.stringify(localMessages));
     } catch {
       // Ignore storage quota errors
     }
-  }, [messages]);
+  }, [localMessages, firebaseUid]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [channelMessages.length, selectedChannel]);
 
-  // Connect to live server chat stream when signed in, with BroadcastChannel + storage sync fallback
+  const extractErrorText = (err: unknown, fallback: string): string => {
+    if (!(err instanceof Error)) return fallback;
+    try {
+      const parsed = JSON.parse(err.message);
+      if (parsed && typeof parsed.error === 'string') return parsed.error;
+    } catch {
+      // Plain error
+    }
+    return err.message || fallback;
+  };
+
+  // Firestore real-time subscriptions (strictly guarded on isSignedIn && firebaseUid)
   useEffect(() => {
-    if (!isSignedIn) return;
+    if (!isSignedIn || !firebaseUid) return;
+    setChatError(null);
+
+    const unsubProfiles = subscribePublicProfiles(
+      (profiles) => {
+        const online: OnlineUser[] = [];
+        const offline: OnlineUser[] = [];
+        for (const p of profiles) {
+          const item: OnlineUser = {
+            clientId: p.uid,
+            username: p.username,
+            avatar: p.avatar,
+          };
+          if (p.online) {
+            online.push(item);
+          } else {
+            offline.push(item);
+          }
+        }
+        setOnlineUsers(online);
+        setServerOfflineUsers(offline);
+      },
+      (err) => {
+        setChatError(extractErrorText(err, 'Unable to load member list from Firestore.'));
+      }
+    );
+
+    return () => {
+      unsubProfiles();
+    };
+  }, [isSignedIn, firebaseUid]);
+
+  useEffect(() => {
+    if (!isSignedIn || !firebaseUid) return;
+
+    const unsubMessages = subscribeChannelMessages(
+      selectedChannel,
+      (msgs) => {
+        setFirebaseMessages((prev) => ({
+          ...prev,
+          [selectedChannel]: msgs,
+        }));
+      },
+      (err) => {
+        setChatError(extractErrorText(err, 'Unable to sync messages for this channel.'));
+      }
+    );
+
+    const unsubTyping = subscribeChannelTyping(
+      selectedChannel,
+      (typers) => {
+        const now = Date.now();
+        const channelMap: Record<string, { username: string; updatedAt: number }> = {};
+        for (const typer of typers) {
+          if (typer.isTyping && typer.uid && typer.uid !== firebaseUid) {
+            const updatedAtMs =
+              typer.updatedAt && typeof typer.updatedAt.toMillis === 'function'
+                ? typer.updatedAt.toMillis()
+                : now;
+            if (now - updatedAtMs <= 8000) {
+              channelMap[typer.uid] = {
+                username: typer.username || 'Someone',
+                updatedAt: now,
+              };
+            }
+          }
+        }
+        setTypingUsersByChannel((prev) => ({
+          ...prev,
+          [selectedChannel]: channelMap,
+        }));
+      },
+      (err) => {
+        setChatError(extractErrorText(err, 'Unable to sync typing status.'));
+      }
+    );
+
+    return () => {
+      unsubMessages();
+      unsubTyping();
+    };
+  }, [isSignedIn, firebaseUid, selectedChannel]);
+
+  // Connect to live server chat stream when signed in locally (non-Firebase mode)
+  useEffect(() => {
+    if (!isSignedIn || firebaseUid) return;
     let eventSource: EventSource | null = null;
     let cancelled = false;
 
@@ -166,7 +285,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         }
         const data = await res.json();
         if (data?.channels && typeof data.channels === 'object') {
-          setMessages(data.channels);
+          setLocalMessages(data.channels);
         }
         if (Array.isArray(data?.onlineUsers) && data.onlineUsers.length > 0) {
           setOnlineUsers(data.onlineUsers);
@@ -185,7 +304,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             const payload = JSON.parse(evt.data);
             if (payload.type === 'init') {
               if (payload.channels && typeof payload.channels === 'object') {
-                setMessages(payload.channels);
+                setLocalMessages(payload.channels);
               }
               if (Array.isArray(payload.onlineUsers)) {
                 setOnlineUsers(payload.onlineUsers);
@@ -199,13 +318,13 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 setServerOfflineUsers(payload.offlineUsers);
               }
             } else if (payload.type === 'message:created' && payload.channelId && payload.message) {
-              setMessages((prev) => {
+              setLocalMessages((prev) => {
                 const list = prev[payload.channelId] || [];
                 if (list.some((m) => m.id === payload.message.id)) return prev;
                 return { ...prev, [payload.channelId]: [...list, payload.message] };
               });
             } else if (payload.type === 'message:updated' && payload.channelId && payload.message) {
-              setMessages((prev) => {
+              setLocalMessages((prev) => {
                 const list = prev[payload.channelId] || [];
                 return {
                   ...prev,
@@ -215,7 +334,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 };
               });
             } else if (payload.type === 'message:deleted' && payload.channelId && payload.messageId) {
-              setMessages((prev) => {
+              setLocalMessages((prev) => {
                 const list = prev[payload.channelId] || [];
                 return {
                   ...prev,
@@ -272,11 +391,11 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       cancelled = true;
       eventSource?.close();
     };
-  }, [clientId, username, isSignedIn]);
+  }, [clientId, username, isSignedIn, firebaseUid]);
 
-  // Broadcast avatar/username presence updates to live chat room
+  // Broadcast avatar/username presence updates to live chat room (local SSE mode)
   useEffect(() => {
-    if (!isSignedIn) return;
+    if (!isSignedIn || firebaseUid) return;
     setOnlineUsers((prev) =>
       prev.map((u) => (u.clientId === clientId ? { ...u, username, avatar: userAvatar } : u))
     );
@@ -287,16 +406,17 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     }).catch(() => {
       // Static mode uses local state
     });
-  }, [isSignedIn, clientId, username, userAvatar]);
+  }, [isSignedIn, firebaseUid, clientId, username, userAvatar]);
 
-  // Cross-tab instant synchronization via BroadcastChannel & storage event
+  // Cross-tab instant synchronization via BroadcastChannel & storage event (local mode)
   useEffect(() => {
+    if (firebaseUid) return;
     if (typeof BroadcastChannel !== 'undefined') {
       const bc = new BroadcastChannel('k1ngkell_chat');
       broadcastRef.current = bc;
       bc.onmessage = (e) => {
         if (e.data?.type === 'sync' && e.data.messages) {
-          setMessages(e.data.messages);
+          setLocalMessages(e.data.messages);
         } else if (
           e.data?.type === 'typing' &&
           e.data.channelId &&
@@ -321,7 +441,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
     const handleStorage = (e: StorageEvent) => {
       if (e.key === CHAT_MESSAGES_STORAGE_KEY && e.newValue) {
-        setMessages(loadSavedMessages());
+        setLocalMessages(loadSavedMessages());
       }
     };
     window.addEventListener('storage', handleStorage);
@@ -352,7 +472,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       window.removeEventListener('storage', handleStorage);
       window.clearInterval(pruneTimer);
     };
-  }, [clientId]);
+  }, [clientId, firebaseUid]);
 
   const sendTypingSignal = (channelId: string, isTyping: boolean) => {
     isCurrentlyTypingRef.current = isTyping;
@@ -360,6 +480,18 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       lastTypingSentAtRef.current = Date.now();
     } else {
       lastTypingSentAtRef.current = 0;
+    }
+
+    if (firebaseUid) {
+      void setFirestoreTypingStatus({
+        channelId,
+        uid: firebaseUid,
+        username,
+        isTyping,
+      }).catch(() => {
+        // Ignore transient typing cleanup errors
+      });
+      return;
     }
 
     broadcastRef.current?.postMessage({
@@ -436,12 +568,27 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     broadcastRef.current?.postMessage({ type: 'sync', messages: nextMessages });
   };
 
-  const handleSaveName = (e: React.FormEvent) => {
+  const handleSaveName = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleaned = nameDraft.trim().slice(0, 32);
-    if (!cleaned) return;
+    if (!cleaned || cleaned.length < 2) return;
+
+    if (firebaseUid) {
+      try {
+        await updateFirestorePublicProfile(firebaseUid, { username: cleaned });
+        setUsername(cleaned);
+        onUpdateSignedInUser?.(cleaned);
+        setIsEditingName(false);
+        setChatError(null);
+      } catch (err) {
+        setChatError(extractErrorText(err, 'Failed to update display name.'));
+      }
+      return;
+    }
+
     setUsername(cleaned);
     localStorage.setItem(CHAT_USERNAME_STORAGE_KEY, cleaned);
+    onUpdateSignedInUser?.(cleaned);
     setOnlineUsers((prev) =>
       prev.map((u) => (u.clientId === clientId ? { ...u, username: cleaned } : u))
     );
@@ -460,6 +607,32 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       hour12: true,
     }).format(new Date());
 
+    setInputText('');
+    if (typingStopTimerRef.current) {
+      window.clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
+    if (isCurrentlyTypingRef.current) {
+      sendTypingSignal(currentChannel, false);
+    }
+
+    if (firebaseUid) {
+      try {
+        await sendFirestoreMessage({
+          channelId: currentChannel,
+          authorUid: firebaseUid,
+          author: username,
+          avatar: userAvatar,
+          content: text,
+          timestamp: formattedTime,
+        });
+        setChatError(null);
+      } catch (err) {
+        setChatError(extractErrorText(err, 'Failed to send message to Firestore.'));
+      }
+      return;
+    }
+
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       author: username,
@@ -471,16 +644,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       reactions: {},
     };
 
-    setInputText('');
-    if (typingStopTimerRef.current) {
-      window.clearTimeout(typingStopTimerRef.current);
-      typingStopTimerRef.current = null;
-    }
-    if (isCurrentlyTypingRef.current) {
-      sendTypingSignal(currentChannel, false);
-    }
-
-    setMessages((prev) => {
+    setLocalMessages((prev) => {
       const list = prev[currentChannel] || [];
       if (list.some((m) => m.id === newMsg.id)) return prev;
       const next = { ...prev, [currentChannel]: [...list, newMsg] };
@@ -501,7 +665,24 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
   const handleReact = async (msgId: string, emoji: string) => {
     const currentChannel = selectedChannel;
-    setMessages((prev) => {
+
+    if (firebaseUid) {
+      const targetMsg = channelMessages.find((m) => m.id === msgId);
+      try {
+        await reactFirestoreMessage(
+          currentChannel,
+          msgId,
+          targetMsg?.reactions || {},
+          emoji
+        );
+        setChatError(null);
+      } catch (err) {
+        setChatError(extractErrorText(err, 'Failed to save reaction.'));
+      }
+      return;
+    }
+
+    setLocalMessages((prev) => {
       const list = prev[currentChannel] || [];
       const updated = list.map((m) => {
         if (m.id !== msgId) return m;
@@ -527,7 +708,18 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
   const handleDeleteMessage = async (msgId: string) => {
     const currentChannel = selectedChannel;
-    setMessages((prev) => {
+
+    if (firebaseUid) {
+      try {
+        await deleteFirestoreMessage(currentChannel, msgId);
+        setChatError(null);
+      } catch (err) {
+        setChatError(extractErrorText(err, 'Failed to delete message.'));
+      }
+      return;
+    }
+
+    setLocalMessages((prev) => {
       const list = prev[currentChannel] || [];
       const next = {
         ...prev,
@@ -556,6 +748,13 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   }, [onlineUsers, clientId, username, userAvatar]);
 
   const offlineMembers = useMemo(() => {
+    if (firebaseUid) {
+      const onlineIds = new Set(displayMembers.map((u) => u.clientId.toLowerCase()));
+      return serverOfflineUsers
+        .filter((u) => !onlineIds.has(u.clientId.toLowerCase()))
+        .sort((a, b) => a.username.localeCompare(b.username));
+    }
+
     const onlineIds = new Set(displayMembers.map((u) => u.clientId.toLowerCase()));
     const onlineNames = new Set(displayMembers.map((u) => u.username.trim().toLowerCase()));
     const map = new Map<string, OnlineUser>();
@@ -596,7 +795,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     }
 
     return Array.from(map.values()).sort((a, b) => a.username.localeCompare(b.username));
-  }, [displayMembers, serverOfflineUsers, messages]);
+  }, [firebaseUid, displayMembers, serverOfflineUsers, messages]);
 
   const activeChannelTypers = useMemo(() => {
     const channelMap = typingUsersByChannel[selectedChannel] || {};
@@ -774,14 +973,38 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               </span>
             </div>
 
-            <button
-              onClick={() => setShowMembers(!showMembers)}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors"
-              title="Toggle Member List"
-            >
-              <Users className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {firebaseUid && (
+                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-[10px] font-semibold text-amber-300">
+                  <Cloud className="w-3 h-3" />
+                  <span>Firebase Live</span>
+                </span>
+              )}
+              <button
+                onClick={() => setShowMembers(!showMembers)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors"
+                title="Toggle Member List"
+              >
+                <Users className="w-4 h-4" />
+              </button>
+            </div>
           </div>
+
+          {chatError && (
+            <div className="mx-4 mt-3 px-3 py-2 rounded-xl bg-rose-950/60 border border-rose-800 text-xs text-rose-200 flex items-center justify-between gap-2 shrink-0">
+              <span className="flex items-center gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="truncate">{chatError}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setChatError(null)}
+                className="text-[11px] font-semibold text-rose-300 hover:text-white shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* Chat Messages List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">

@@ -1,0 +1,287 @@
+{
+  "entities": {
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Public chat and community identity for a signed-in K1ngkell user without PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 24000
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "lastSeenAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "username",
+        "bio",
+        "avatar",
+        "online",
+        "lastSeenAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PrivateAccount": {
+      "title": "PrivateAccount",
+      "description": "Owner-only private account document storing email and saved music playlists.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 254
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "likedTrackIds": {
+          "type": "array"
+        },
+        "customTracks": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "likedTrackIds",
+        "customTracks",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatChannel": {
+      "title": "ChatChannel",
+      "description": "Metadata document for a K1ngkell shared chat room.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "general",
+            "gaming-lounge",
+            "music-vibes",
+            "tech-chat",
+            "announcements"
+          ],
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "createdBy",
+        "createdAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A user-authored message in a K1ngkell chat channel.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "channelId": {
+          "type": "string",
+          "enum": [
+            "general",
+            "gaming-lounge",
+            "music-vibes",
+            "tech-chat",
+            "announcements"
+          ],
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 24000
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "timestamp": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "reactions": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "channelId",
+        "authorUid",
+        "author",
+        "avatar",
+        "content",
+        "timestamp",
+        "reactions",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TypingStatus": {
+      "title": "TypingStatus",
+      "description": "Ephemeral per-user typing state inside a chat channel.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "channelId": {
+          "type": "string",
+          "enum": [
+            "general",
+            "gaming-lounge",
+            "music-vibes",
+            "tech-chat",
+            "announcements"
+          ],
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "isTyping": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "channelId",
+        "username",
+        "isTyping",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/publicProfiles/{userId}": {
+      "schema": {
+        "$ref": "#/entities/PublicProfile"
+      },
+      "description": "Public profile records (username, bio, avatar, online/offline presence) readable by verified signed-in members."
+    },
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/PrivateAccount"
+      },
+      "description": "Private owner-only user account records holding PII (email) and saved music playlists."
+    },
+    "/chatChannels/{channelId}": {
+      "schema": {
+        "$ref": "#/entities/ChatChannel"
+      },
+      "description": "Shared chat room metadata parent documents."
+    },
+    "/chatChannels/{channelId}/messages/{messageId}": {
+      "schema": {
+        "$ref": "#/entities/ChatMessage"
+      },
+      "description": "Persistent real-time messages inside each chat channel."
+    },
+    "/chatChannels/{channelId}/typing/{userId}": {
+      "schema": {
+        "$ref": "#/entities/TypingStatus"
+      },
+      "description": "Per-user typing indicator documents scoped to a chat channel."
+    }
+  }
+}

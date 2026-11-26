@@ -4,6 +4,8 @@ export interface StoredAccount {
   salt: string;
   bio?: string;
   avatar?: string;
+  googleUid?: string;
+  googleEmail?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -112,6 +114,104 @@ export function hasAnyAccounts(): boolean {
 export function getAccount(username: string): StoredAccount | null {
   const accounts = loadAccounts();
   return accounts[normalizeKey(username)] || null;
+}
+
+export function getAccountByGoogleUid(googleUid: string): StoredAccount | null {
+  if (!googleUid) return null;
+  const accounts = loadAccounts();
+  for (const acct of Object.values(accounts)) {
+    if (acct && acct.googleUid === googleUid) {
+      return acct;
+    }
+  }
+  return null;
+}
+
+export function linkLocalAccountToGoogle(
+  username: string,
+  googleUid: string,
+  googleEmail: string,
+  extra?: { bio?: string; avatar?: string }
+): StoredAccount {
+  const accounts = loadAccounts();
+  const cleanName = username.trim().slice(0, 32) || 'K1ngkellUser';
+  const key = normalizeKey(cleanName);
+  const now = new Date().toISOString();
+
+  // Ensure each googleUid maps cleanly to one local account record
+  for (const [otherKey, acct] of Object.entries(accounts)) {
+    if (otherKey !== key && acct?.googleUid === googleUid) {
+      accounts[otherKey] = {
+        ...acct,
+        googleUid: undefined,
+        googleEmail: undefined,
+        updatedAt: now,
+      };
+    }
+  }
+
+  const existing = accounts[key];
+  const updated: StoredAccount = existing
+    ? {
+        ...existing,
+        username: cleanName,
+        bio: extra?.bio !== undefined ? extra.bio : existing.bio,
+        avatar: extra?.avatar !== undefined ? extra.avatar : existing.avatar,
+        googleUid,
+        googleEmail: googleEmail || existing.googleEmail,
+        updatedAt: now,
+      }
+    : {
+        username: cleanName,
+        passwordHash: '',
+        salt: '',
+        bio: extra?.bio || '',
+        avatar: extra?.avatar || pickDistinctAvatarForAccount(cleanName, accounts),
+        googleUid,
+        googleEmail,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+  accounts[key] = updated;
+  saveAccounts(accounts);
+  return updated;
+}
+
+export function syncLocalAccountFromGoogle(params: {
+  googleUid: string;
+  googleEmail: string;
+  username: string;
+  bio: string;
+  avatar: string;
+}): void {
+  const accounts = loadAccounts();
+  const matchEntry = Object.entries(accounts).find(
+    ([, acct]) => acct?.googleUid === params.googleUid
+  );
+  if (!matchEntry) return;
+
+  const [oldKey, existing] = matchEntry;
+  const nextName = params.username.trim().slice(0, 32) || existing.username;
+  const newKey = normalizeKey(nextName);
+  const now = new Date().toISOString();
+
+  const updated: StoredAccount = {
+    ...existing,
+    username: nextName,
+    bio: params.bio,
+    avatar: params.avatar,
+    googleEmail: params.googleEmail || existing.googleEmail,
+    updatedAt: now,
+  };
+
+  if (newKey !== oldKey && !accounts[newKey]) {
+    delete accounts[oldKey];
+    accounts[newKey] = updated;
+  } else {
+    accounts[oldKey] = updated;
+  }
+  saveAccounts(accounts);
 }
 
 export function setSignedInSession(username: string | null): void {

@@ -1,8 +1,12 @@
 import React, { useState } from 'react';
+import { signInWithPopup } from 'firebase/auth';
 import { Logo } from './Logo';
 import { UserAvatar, AVATAR_PRESETS } from './UserAvatar';
 import { Lock, Unlock, KeyRound, CheckCircle, User, X, Eye, EyeOff, UserPlus, Check } from 'lucide-react';
 import { LogoStyle } from '../types';
+import { auth, googleProvider } from '../firebase';
+import { runWithGoogleLinkLock, syncGoogleUserAccounts } from '../services/firebaseAccountService';
+import { GoogleGIcon } from './GoogleGIcon';
 import {
   authenticateAccount,
   hasAnyAccounts,
@@ -10,8 +14,14 @@ import {
   registerAccount,
 } from '../utils/accountAuth';
 
+export interface FirebaseSignInInfo {
+  uid: string;
+  email: string;
+  bio: string;
+}
+
 interface SignInGateProps {
-  onUnlock: (username: string, avatar?: string) => void;
+  onUnlock: (username: string, avatar?: string, firebaseInfo?: FirebaseSignInInfo) => void;
   onCancel?: () => void;
   logoStyle?: LogoStyle;
 }
@@ -36,6 +46,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [googleLoading, setGoogleLoading] = useState<boolean>(false);
 
   const handleModeSwitch = (nextMode: 'signin' | 'register') => {
     setMode(nextMode);
@@ -55,6 +66,35 @@ export const SignInGate: React.FC<SignInGateProps> = ({
     setUsername(nextName);
     if (mode === 'register' && !avatarManuallyPicked && nextName.trim()) {
       setSelectedAvatar(pickDistinctAvatarForAccount(nextName));
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setGoogleLoading(true);
+    try {
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
+      const { publicProfile, privateAccount, uid, email } = await runWithGoogleLinkLock(async () => {
+        const result = await signInWithPopup(auth, googleProvider);
+        const synced = await syncGoogleUserAccounts(result.user);
+        return {
+          ...synced,
+          uid: result.user.uid,
+          email: result.user.email || '',
+        };
+      });
+      onUnlock(publicProfile.username, publicProfile.avatar, {
+        uid,
+        email: privateAccount.email || email,
+        bio: publicProfile.bio || '',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unable to sign in with Google.';
+      if (!/popup-closed-by-user|cancelled-popup-request/i.test(msg)) {
+        setError(msg);
+      }
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -110,8 +150,28 @@ export const SignInGate: React.FC<SignInGateProps> = ({
             <span className="text-blue-600">ngkell</span> Account
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs">
-            Sign in with your username and password to access Chat channels and saved playlists.
+            Sign in with Google for Firebase Cloud Accounts &amp; Chat, or use a local account below.
           </p>
+        </div>
+
+        {/* Google Sign-In CTA */}
+        <button
+          type="button"
+          onClick={handleGoogleSignIn}
+          disabled={googleLoading || submitting}
+          className="w-full py-2.5 px-4 mb-4 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+        >
+          <GoogleGIcon className="w-4 h-4 shrink-0" />
+          <span>{googleLoading ? 'Signing in with Google...' : 'Sign in with Google'}</span>
+        </button>
+
+        <div className="relative my-3 text-center">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-slate-200 dark:border-slate-800" />
+          </div>
+          <span className="relative px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-white dark:bg-slate-900">
+            Or Local Account
+          </span>
         </div>
 
         {/* Mode Switcher */}
@@ -158,11 +218,11 @@ export const SignInGate: React.FC<SignInGateProps> = ({
           )}
           <div className="text-left text-xs">
             <div className="font-semibold text-slate-800 dark:text-slate-200">
-              {mode === 'register' ? 'Create Your Account' : 'Password Sign In'}
+              {mode === 'register' ? 'Create Local Account' : 'Password Sign In'}
             </div>
             <div className="text-slate-500 dark:text-slate-400 text-[11px]">
               {mode === 'register'
-                ? 'Pick a unique avatar, username, and password for this account.'
+                ? 'Pick a unique avatar, username, and password for this browser.'
                 : 'Enter your registered username and password to continue.'}
             </div>
           </div>
@@ -276,7 +336,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || googleLoading}
             className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
             {mode === 'register' ? (
@@ -306,7 +366,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
         <div className="mt-3 text-center">
           <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
             <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-            <span>SHA-256 Salted Password Storage</span>
+            <span>Firebase Firestore + Local Storage Ready</span>
           </span>
         </div>
       </div>

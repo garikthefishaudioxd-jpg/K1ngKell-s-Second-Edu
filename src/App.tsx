@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   ActiveTab,
   BackgroundTheme,
@@ -14,7 +15,7 @@ import {
   EmbedSearchResult,
 } from './types';
 import { BackgroundWrapper } from './components/BackgroundWrapper';
-import { SignInGate } from './components/SignInGate';
+import { SignInGate, type FirebaseSignInInfo } from './components/SignInGate';
 import { Navbar } from './components/Navbar';
 import { HomeTab } from './components/HomeTab';
 import { GamesTab } from './components/GamesTab';
@@ -26,6 +27,12 @@ import { SecurityTab } from './components/SecurityTab';
 import { SettingsTab } from './components/SettingsTab';
 import { EmbedWorkspace } from './components/EmbedWorkspace';
 import { getAccount, pickDistinctAvatarForAccount } from './utils/accountAuth';
+import { auth } from './firebase';
+import {
+  setFirestorePresenceOffline,
+  syncGoogleUserAccounts,
+  waitForPendingGoogleLink,
+} from './services/firebaseAccountService';
 
 function isLikelyUrl(input: string): boolean {
   const trimmed = input.trim();
@@ -128,10 +135,12 @@ function loadSavedEmbedTabs(): EmbedTabItem[] {
 export default function App() {
   // Signed-in session state (starts Signed Out unless user signs in)
   const [signedInUser, setSignedInUser] = useState<string | null>(() => {
+    if (localStorage.getItem('k1ngkell_auth_mode') === 'firebase') return null;
     const saved = localStorage.getItem('k1ngkell_signed_in_user');
     return saved && saved.trim() ? saved.trim() : null;
   });
   const [userAvatar, setUserAvatar] = useState<string>(() => {
+    if (localStorage.getItem('k1ngkell_auth_mode') === 'firebase') return 'initials';
     const savedUser = localStorage.getItem('k1ngkell_signed_in_user');
     if (savedUser) {
       const acct = getAccount(savedUser);
@@ -141,7 +150,15 @@ export default function App() {
     }
     return localStorage.getItem('k1ngkell_user_avatar') || 'initials';
   });
+  const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
+  const [firebaseEmail, setFirebaseEmail] = useState<string | null>(null);
+  const [userBio, setUserBio] = useState<string>('');
+  const firebaseUidRef = useRef<string | null>(null);
   const [showSignInModal, setShowSignInModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    firebaseUidRef.current = firebaseUid;
+  }, [firebaseUid]);
 
   // Navigation tab
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
@@ -290,21 +307,123 @@ export default function App() {
     }
   }, [userAvatar]);
 
-  const handleSignOut = () => {
+  // Sync Firebase Auth session on load & auth state transitions
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser && fbUser.emailVerified) {
+        try {
+          await waitForPendingGoogleLink();
+          const { publicProfile, privateAccount } = await syncGoogleUserAccounts(fbUser);
+          localStorage.setItem('k1ngkell_auth_mode', 'firebase');
+          localStorage.setItem('k1ngkell_signed_in_user', publicProfile.username);
+          setFirebaseUid(fbUser.uid);
+          setFirebaseEmail(privateAccount.email || fbUser.email || null);
+          setUserBio(publicProfile.bio || '');
+          setUserAvatar(publicProfile.avatar || pickDistinctAvatarForAccount(fbUser.uid));
+          setSignedInUser(publicProfile.username);
+        } catch (err) {
+          console.error('Failed to synchronize Firebase account:', err);
+        }
+        return;
+      }
+
+      if (firebaseUidRef.current || localStorage.getItem('k1ngkell_auth_mode') === 'firebase') {
+        localStorage.removeItem('k1ngkell_auth_mode');
+        localStorage.removeItem('k1ngkell_signed_in_user');
+        localStorage.removeItem('k1ngkell_user_avatar');
+        setFirebaseUid(null);
+        setFirebaseEmail(null);
+        setUserBio('');
+        setSignedInUser(null);
+        setUserAvatar('initials');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Mark Firebase presence offline when closing or leaving the page
+  useEffect(() => {
+    if (!firebaseUid) return;
+    const handlePageHide = () => {
+      void setFirestorePresenceOffline(firebaseUid).catch(() => {
+        // Ignore network errors during unload
+      });
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
+  }, [firebaseUid]);
+
+  const handleSignOut = async () => {
+    const uidToSignOut = firebaseUid;
     localStorage.removeItem('k1ngkell_signed_in_user');
+    localStorage.removeItem('k1ngkell_auth_mode');
     localStorage.removeItem('k1ngkell_gate_unlocked');
     localStorage.removeItem('k1ngkell_captcha_verified');
     localStorage.removeItem('k1ngkell_user_avatar');
     setSignedInUser(null);
     setUserAvatar('initials');
+    setFirebaseUid(null);
+    setFirebaseEmail(null);
+    setUserBio('');
+    if (uidToSignOut) {
+      try {
+        await setFirestorePresenceOffline(uidToSignOut);
+      } catch {
+        // Best-effort offline status update
+      }
+      try {
+        await signOut(auth);
+      } catch {
+        // Ignore signOut errors
+      }
+    }
   };
 
-  const handleSignInSuccess = (username: string, avatar?: string) => {
+  const handleSignInSuccess = (
+    username: string,
+    avatar?: string,
+    firebaseInfo?: FirebaseSignInInfo
+  ) => {
+    if (firebaseInfo) {
+      localStorage.setItem('k1ngkell_auth_mode', 'firebase');
+      localStorage.setItem('k1ngkell_signed_in_user', username);
+      setFirebaseUid(firebaseInfo.uid);
+      setFirebaseEmail(firebaseInfo.email || null);
+      setUserBio(firebaseInfo.bio || '');
+      setUserAvatar(avatar || pickDistinctAvatarForAccount(firebaseInfo.uid));
+      setSignedInUser(username);
+      setShowSignInModal(false);
+      return;
+    }
+
+    localStorage.setItem('k1ngkell_auth_mode', 'local');
+    localStorage.setItem('k1ngkell_signed_in_user', username);
     const acct = getAccount(username);
     const resolvedAvatar =
       avatar || acct?.avatar || pickDistinctAvatarForAccount(username);
+    setFirebaseUid(null);
+    setFirebaseEmail(null);
+    setUserBio('');
     setUserAvatar(resolvedAvatar);
     setSignedInUser(username);
+    setShowSignInModal(false);
+  };
+
+  const handleGoogleAccountSignedIn = (info: {
+    uid: string;
+    email: string;
+    username: string;
+    bio: string;
+    avatar: string;
+  }) => {
+    localStorage.setItem('k1ngkell_auth_mode', 'firebase');
+    localStorage.setItem('k1ngkell_signed_in_user', info.username);
+    setFirebaseUid(info.uid);
+    setFirebaseEmail(info.email || null);
+    setUserBio(info.bio || '');
+    setUserAvatar(info.avatar || pickDistinctAvatarForAccount(info.uid));
+    setSignedInUser(info.username);
     setShowSignInModal(false);
   };
 
@@ -583,6 +702,7 @@ export default function App() {
           <MusicTab
             isSignedIn={Boolean(signedInUser)}
             onRequireSignIn={() => setShowSignInModal(true)}
+            firebaseUid={firebaseUid}
           />
         )}
 
@@ -595,6 +715,8 @@ export default function App() {
             userAvatar={userAvatar}
             onRequireSignIn={() => setShowSignInModal(true)}
             onOpenAvatarSettings={() => setActiveTab('settings')}
+            firebaseUid={firebaseUid}
+            onUpdateSignedInUser={(newUsername) => setSignedInUser(newUsername)}
           />
         )}
 
@@ -640,6 +762,11 @@ export default function App() {
             onOpenSignIn={() => setShowSignInModal(true)}
             onSignOut={handleSignOut}
             onUpdateSignedInUser={(newUsername) => setSignedInUser(newUsername)}
+            firebaseUid={firebaseUid}
+            firebaseEmail={firebaseEmail}
+            userBio={userBio}
+            onUpdateUserBio={setUserBio}
+            onGoogleAccountSignedIn={handleGoogleAccountSignedIn}
           />
         )}
       </main>
